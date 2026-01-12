@@ -431,20 +431,27 @@
 - (void)setSpeed:(float)speed {
     if (_player) {
         BOOL wasPlaying = _player.isPlaying;
-        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: %f (wasPlaying: %d)", speed, wasPlaying);
+        float currentPosition = _player.position;
+        VLCMediaPlayerState currentState = _player.state;
+        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: %f (wasPlaying: %d, state: %d, position: %f)", speed, wasPlaying, (int)currentState, currentPosition);
 
         // VLC's setRate can sometimes pause playback, so we need to handle this
         [_player setRate:speed];
 
+        RCTLogInfo(@"[UnifiedPlayerViewManager] After setRate - isPlaying: %d, state: %d", _player.isPlaying, (int)_player.state);
+
         // If the player was playing before, make sure it continues playing
-        if (wasPlaying && !_player.isPlaying) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (!self->_player.isPlaying) {
+        if (wasPlaying || currentState == VLCMediaPlayerStatePlaying || currentState == VLCMediaPlayerStateBuffering) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                RCTLogInfo(@"[UnifiedPlayerViewManager] Delayed check - isPlaying: %d, state: %d", self->_player.isPlaying, (int)self->_player.state);
+                if (!self->_player.isPlaying && self->_player.state != VLCMediaPlayerStatePlaying) {
                     [self->_player play];
                     RCTLogInfo(@"[UnifiedPlayerViewManager] Resumed playback after speed change");
                 }
             });
         }
+    } else {
+        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: player is nil!");
     }
 }
 
@@ -861,7 +868,11 @@
     if (duration > 0 && !isnan(duration)) {
         [self sendProgressEvent:currentTime duration:duration];
     }
-    // RCTLogInfo(@"[UnifiedPlayerViewManager] mediaPlayerTimeChanged - CurrentTime: %f, Duration: %f", currentTime, duration); // Commented out for less noise
+    // Log every 2 seconds approximately
+    static int logCounter = 0;
+    if (logCounter++ % 8 == 0) {
+        RCTLogInfo(@"[UnifiedPlayerViewManager] mediaPlayerTimeChanged - CurrentTime: %f, Duration: %f, Rate: %f", currentTime, duration, _player.rate);
+    }
 }
 
 - (void)mediaPlayerStateChanged:(NSNotification *)notification {
