@@ -191,4 +191,21 @@ RCT_EXPORT_METHOD(toggleFullscreen:(nonnull NSNumber *)reactTag
     }];
 }
 
+#pragma mark - Speed Control
+
+RCT_EXPORT_METHOD(setSpeed:(nonnull NSNumber *)reactTag
+                  speed:(nonnull NSNumber *)speed
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+    [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
+        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
+        if (player) {
+            [player setRate:[speed floatValue]];
+            resolve(@(YES));
+        } else {
+            reject(@"E_PLAYER_ERROR", @"Player not initialized", nil);
+        }
+    }];
+}
+
 @end

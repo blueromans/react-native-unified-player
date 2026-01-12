@@ -1527,7 +1527,7 @@ PODS:
     - React-perflogger (= 0.78.2)
     - React-utils (= 0.78.2)
   - SocketRocket (0.7.1)
-  - UnifiedPlayer (0.3.9):
+  - UnifiedPlayer (0.4.1):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1832,9 +1832,9 @@ SPEC CHECKSUMS:
   ReactCodegen: 99ea3536c05be3c18d0c517acb56b5a6d726fc7b
   ReactCommon: 865ebe76504a95e115b6229dd00a31e56d2d4bfe
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  UnifiedPlayer: d409954f637690bf3ab368dde85f3dd62177d9a3
+  UnifiedPlayer: c783ef3eb71d43466076ab277d7ba8df0bcdc1ef
   Yoga: e14bad835e12b6c7e2260fc320bd00e0f4b45add
 
 PODFILE CHECKSUM: 89ddaf8ef6736dd21f8918101d6a0e0c907a198f
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2

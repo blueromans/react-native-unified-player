@@ -57,6 +57,8 @@ export interface UnifiedPlayerRef {
   stopRecording: () => Promise<string>;
   /** Toggle fullscreen mode */
   toggleFullscreen: (isFullscreen: boolean) => Promise<boolean>;
+  /** Set playback speed (e.g., 1.0, 2.0, 4.0, 8.0) */
+  setSpeed: (speed: number) => Promise<boolean>;
 }
 
 /**
@@ -218,6 +220,8 @@ export const UnifiedPlayerView = forwardRef<
           NativeModule.toggleFullscreen,
           isFullscreen
         ),
+      setSpeed: (speed: number) =>
+        callNativeMethod('setSpeed', NativeModule.setSpeed, speed),
     }),
     [callNativeMethod]
   );

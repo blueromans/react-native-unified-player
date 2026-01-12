@@ -122,4 +122,10 @@ class UnifiedPlayerModule(private val reactContext: ReactApplicationContext) : R
     fun stopRecording(viewTag: Int, promise: Promise) = executeOnPlayerView(viewTag, promise, "RECORDING_ERROR") {
         it.stopRecording()
     }
+
+    @ReactMethod
+    fun setSpeed(viewTag: Int, speed: Float, promise: Promise) = executeOnPlayerView(viewTag, promise, "SPEED_ERROR") {
+        it.setSpeed(speed)
+        true
+    }
 }

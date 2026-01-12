@@ -445,10 +445,18 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
             val milliseconds = (seconds * 1000).toLong()
             Log.d(TAG, "Seeking to $milliseconds ms")
             it.seekTo(milliseconds)
-            
+
             // Force a progress update after seeking
             progressRunnable.run()
         } ?: Log.e(TAG, "Cannot seek: player is null")
+    }
+
+    fun setSpeed(speed: Float) {
+        Log.d(TAG, "SetSpeed method called with speed: $speed")
+        player?.let {
+            it.setPlaybackSpeed(speed)
+            Log.d(TAG, "Playback speed set to: $speed")
+        } ?: Log.e(TAG, "Cannot set speed: player is null")
     }
 
     fun getCurrentTime(): Float {

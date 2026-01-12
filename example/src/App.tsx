@@ -23,6 +23,7 @@ import {
   ProgressDisplay,
   CapturedFrame,
   RecordingControls,
+  SpeedControl,
 } from './components';
 
 const singleVideoUrl =
@@ -52,6 +53,7 @@ function App(): React.JSX.Element {
   const [recordedVideoPath, setRecordedVideoPath] = useState<string | null>(
     null
   );
+  const [speed, setSpeed] = useState(1);
 
   const reinitializePlayer = useCallback(async () => {
     console.log('Attempting to reinitialize player');
@@ -83,12 +85,14 @@ function App(): React.JSX.Element {
     };
   }, [progressEventsReceived, reinitializePlayer]);
 
-  const handleProgress = (data: { currentTime: number; duration: number }) => {
-    if (data.duration > 0) {
-      setCurrentTime(data.currentTime);
-      setDuration(data.duration);
-      lastProgressTimeRef.current = data.currentTime;
-      lastDurationRef.current = data.duration;
+  const handleProgress = (data: any) => {
+    // Handle both direct data and nativeEvent wrapper
+    const eventData = data?.nativeEvent || data;
+    if (eventData?.duration && eventData.duration > 0) {
+      setCurrentTime(eventData.currentTime ?? 0);
+      setDuration(eventData.duration);
+      lastProgressTimeRef.current = eventData.currentTime ?? 0;
+      lastDurationRef.current = eventData.duration;
       if (!progressEventsReceived) {
         setProgressEventsReceived(true);
         console.log('Progress events are being received with valid data');
@@ -126,6 +130,16 @@ function App(): React.JSX.Element {
 
   const handlePlaybackComplete = async () => {
     console.log(`Event: ${UnifiedPlayerEventTypes.COMPLETE}`);
+    // Reset speed to 1x when video completes
+    if (speed !== 1) {
+      try {
+        await playerRef.current?.setSpeed(1);
+        setSpeed(1);
+        console.log('Speed reset to 1x on completion');
+      } catch (error) {
+        console.warn('Failed to reset speed:', error);
+      }
+    }
     if (loop) {
       console.log('Video ended, looping');
       try {
@@ -319,6 +333,23 @@ function App(): React.JSX.Element {
     Alert.alert('Reset', 'Player reset to original video');
   };
 
+  const handleSpeedChange = async (newSpeed: number) => {
+    try {
+      await playerRef.current?.setSpeed(newSpeed);
+      setSpeed(newSpeed);
+    } catch (error) {
+      console.error('Speed change failed:', error);
+      // Try to recover by resetting to 1x
+      try {
+        await playerRef.current?.setSpeed(1);
+        setSpeed(1);
+      } catch {
+        // Ignore recovery error
+      }
+      Alert.alert('Speed Error', `Failed to set ${newSpeed}x speed`);
+    }
+  };
+
   if (showSimpleExample) {
     return <SimpleExample onSwitchToFull={() => setShowSimpleExample(false)} />;
   }
@@ -391,6 +422,11 @@ function App(): React.JSX.Element {
             onSeek={handleSeekTo}
             seekTime={10}
             seekLabel="Seek 10s"
+          />
+
+          <SpeedControl
+            currentSpeed={speed}
+            onSpeedChange={handleSpeedChange}
           />
 
           <View style={styles.buttonRow}>

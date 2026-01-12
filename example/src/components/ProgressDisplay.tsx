@@ -1,22 +1,22 @@
 import { View, Text, StyleSheet } from 'react-native';
 
 interface ProgressDisplayProps {
-  currentTime: number;
-  duration: number;
+  currentTime?: number;
+  duration?: number;
   isReady?: boolean;
   isReceivingEvents?: boolean;
 }
 
 export function ProgressDisplay({
-  currentTime,
-  duration,
+  currentTime = 0,
+  duration = 0,
   isReady,
   isReceivingEvents,
 }: ProgressDisplayProps) {
   return (
     <View style={styles.container}>
       <Text style={styles.progressText}>
-        {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
+        {(currentTime ?? 0).toFixed(1)}s / {(duration ?? 0).toFixed(1)}s
       </Text>
       {isReady !== undefined && (
         <Text style={styles.statusText}>
