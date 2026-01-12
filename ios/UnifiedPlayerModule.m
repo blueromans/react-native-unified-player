@@ -198,13 +198,8 @@ RCT_EXPORT_METHOD(setSpeed:(nonnull NSNumber *)reactTag
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
     [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
-        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
-        if (player) {
-            [player setRate:[speed floatValue]];
-            resolve(@(YES));
-        } else {
-            reject(@"E_PLAYER_ERROR", @"Player not initialized", nil);
-        }
+        [playerView setSpeed:[speed floatValue]];
+        resolve(@(YES));
     }];
 }
 

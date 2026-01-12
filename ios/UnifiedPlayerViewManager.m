@@ -207,22 +207,32 @@
 }
 
 - (void)sendEvent:(NSString *)eventName body:(NSDictionary *)body {
-    // Dictionary-based event dispatch for O(1) lookup
-    NSDictionary<NSString *, RCTDirectEventBlock> *eventHandlers = @{
-        @"onLoadStart": self.onLoadStart ?: (id)[NSNull null],
-        @"onReadyToPlay": self.onReadyToPlay ?: (id)[NSNull null],
-        @"onError": self.onError ?: (id)[NSNull null],
-        @"onProgress": self.onProgress ?: (id)[NSNull null],
-        @"onPlaybackComplete": self.onPlaybackComplete ?: (id)[NSNull null],
-        @"onPlaybackStalled": self.onPlaybackStalled ?: (id)[NSNull null],
-        @"onPlaybackResumed": self.onPlaybackResumed ?: (id)[NSNull null],
-        @"onPlaying": self.onPlaying ?: (id)[NSNull null],
-        @"onPaused": self.onPaused ?: (id)[NSNull null],
-        @"onFullscreenChanged": self.onFullscreenChanged ?: (id)[NSNull null],
-    };
+    // Direct event dispatch based on event name
+    RCTDirectEventBlock handler = nil;
 
-    RCTDirectEventBlock handler = eventHandlers[eventName];
-    if (handler && handler != (id)[NSNull null]) {
+    if ([eventName isEqualToString:@"onLoadStart"]) {
+        handler = self.onLoadStart;
+    } else if ([eventName isEqualToString:@"onReadyToPlay"]) {
+        handler = self.onReadyToPlay;
+    } else if ([eventName isEqualToString:@"onError"]) {
+        handler = self.onError;
+    } else if ([eventName isEqualToString:@"onProgress"]) {
+        handler = self.onProgress;
+    } else if ([eventName isEqualToString:@"onPlaybackComplete"]) {
+        handler = self.onPlaybackComplete;
+    } else if ([eventName isEqualToString:@"onPlaybackStalled"]) {
+        handler = self.onPlaybackStalled;
+    } else if ([eventName isEqualToString:@"onPlaybackResumed"]) {
+        handler = self.onPlaybackResumed;
+    } else if ([eventName isEqualToString:@"onPlaying"]) {
+        handler = self.onPlaying;
+    } else if ([eventName isEqualToString:@"onPaused"]) {
+        handler = self.onPaused;
+    } else if ([eventName isEqualToString:@"onFullscreenChanged"]) {
+        handler = self.onFullscreenChanged;
+    }
+
+    if (handler) {
         handler(body);
     }
 }
@@ -306,12 +316,15 @@
             [media addOption:option];
         }
 
+        // Parse media to get metadata (including duration)
+        [media parseWithOptions:VLCMediaParseNetwork | VLCMediaFetchNetwork timeout:10000];
+
         // Set new media to player
         self->_player.media = media;
         self->_player.drawable = self;
         self->_player.videoAspectRatio = NULL; // Use default aspect ratio
 
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Media configured with options: %@", mediaOptions);
+        RCTLogInfo(@"[UnifiedPlayerViewManager] Media configured with options: %@, duration: %d ms", mediaOptions, media.length.intValue);
 
         // Use UIKit methods for layout/display updates
         [self setNeedsLayout];
@@ -400,9 +413,39 @@
 
 - (float)getDuration {
     if (_player && _player.media) {
-        return _player.media.length.intValue / 1000.0f;
+        float mediaDuration = _player.media.length.intValue / 1000.0f;
+
+        // If media.length is not available yet, try to calculate from position and time
+        if (mediaDuration <= 0 && _player.position > 0) {
+            float currentTime = _player.time.intValue / 1000.0f;
+            if (currentTime > 0) {
+                mediaDuration = currentTime / _player.position;
+            }
+        }
+
+        return mediaDuration;
     }
     return 0.0f;
+}
+
+- (void)setSpeed:(float)speed {
+    if (_player) {
+        BOOL wasPlaying = _player.isPlaying;
+        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: %f (wasPlaying: %d)", speed, wasPlaying);
+
+        // VLC's setRate can sometimes pause playback, so we need to handle this
+        [_player setRate:speed];
+
+        // If the player was playing before, make sure it continues playing
+        if (wasPlaying && !_player.isPlaying) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (!self->_player.isPlaying) {
+                    [self->_player play];
+                    RCTLogInfo(@"[UnifiedPlayerViewManager] Resumed playback after speed change");
+                }
+            });
+        }
+    }
 }
 
 - (void)captureFrameWithCompletion:(void (^)(NSString * _Nullable base64String, NSError * _Nullable error))completion {

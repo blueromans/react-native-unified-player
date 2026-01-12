@@ -55,6 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)startRecordingToPath:(NSString *)outputPath;
 - (void)startFrameCapture;
 - (NSString *)stopRecording;
+- (void)setSpeed:(float)speed;
 
 @end
 
