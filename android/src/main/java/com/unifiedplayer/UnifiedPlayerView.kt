@@ -1,21 +1,16 @@
 package com.unifiedplayer
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.view.PixelCopy
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import android.util.Log
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.View
-import android.view.Surface
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.bumptech.glide.Glide
@@ -26,53 +21,39 @@ import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Tracks
-import com.google.android.exoplayer2.ui.PlayerView
 import com.google.android.exoplayer2.video.VideoSize
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.uimanager.events.RCTEventEmitter
 import java.io.File
-import java.io.IOException
-import java.util.Collections // Import for Collections.emptyList()
-import android.media.MediaCodec
-import android.media.MediaCodecInfo
-import android.media.MediaFormat
-import android.media.MediaMuxer
-import java.nio.ByteBuffer
 import android.os.Environment
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_COMPLETE
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_ERROR
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_LOAD_START
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_PAUSED
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_PLAYING
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_PROGRESS
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_READY
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_RESUMED
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_STALLED
-import com.unifiedplayer.UnifiedPlayerEventEmitter.Companion.EVENT_FULLSCREEN_CHANGED
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.os.Build
 
 class UnifiedPlayerView(context: Context) : FrameLayout(context) {
-    // Recording related variables
-    private var mediaRecorder: MediaMuxer? = null
-    private var videoEncoder: MediaCodec? = null
-    private var recordingSurface: Surface? = null
-    private var isRecording = false
-    private var outputPath: String? = null
-    private var recordingThread: Thread? = null
-    private var videoTrackIndex = -1
-    private val bufferInfo = MediaCodec.BufferInfo()
     companion object {
         private const val TAG = "UnifiedPlayerView"
+
+        // Event type constants
+        const val EVENT_LOAD_START = "onLoadStart"
+        const val EVENT_READY = "onReadyToPlay"
+        const val EVENT_ERROR = "onError"
+        const val EVENT_PROGRESS = "onProgress"
+        const val EVENT_COMPLETE = "onPlaybackComplete"
+        const val EVENT_STALLED = "onPlaybackStalled"
+        const val EVENT_RESUMED = "onPlaybackResumed"
+        const val EVENT_PLAYING = "onPlaying"
+        const val EVENT_PAUSED = "onPaused"
+        const val EVENT_FULLSCREEN_CHANGED = "onFullscreenChanged"
     }
 
+    // Recording state (Note: "recording" actually downloads the source file, not screen recording)
+    private var isRecording = false
+    private var outputPath: String? = null
+
     // Player state
-    private var videoUrl: String? = null // Single video URL
-    private var videoUrls: List<String> = emptyList() // Playlist URLs
-    private var currentVideoIndex: Int = 0
-    private var isPlaylist: Boolean = false
+    private var videoUrl: String? = null
     private var thumbnailUrl: String? = null
     private var autoplay: Boolean = true
     private var loop: Boolean = false
@@ -169,37 +150,9 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
                     }
                     Player.STATE_ENDED -> {
                         Log.d(TAG, "ExoPlayer STATE_ENDED")
-                        if (isPlaylist) {
-                            // Playlist logic
-                            val nextIndex = currentVideoIndex + 1
-                            if (nextIndex < videoUrls.size) {
-                                // Play next video in the list
-                                Log.d(TAG, "Playlist: Loading next video at index $nextIndex")
-                                loadVideoAtIndex(nextIndex)
-                                // Don't send EVENT_COMPLETE for individual items in playlist
-                            } else {
-                                // Reached the end of the playlist
-                                if (loop) {
-                                    // Loop playlist: Go back to the first video
-                                    Log.d(TAG, "Playlist: Looping back to start")
-                                    loadVideoAtIndex(0)
-                                    // Don't send EVENT_COMPLETE when looping playlist
-                                } else {
-                                    // End of playlist, not looping
-                                    Log.d(TAG, "Playlist: Reached end, not looping")
-                                    currentVideoIndex = 0 // Reset index for potential future play
-                                    sendEvent(EVENT_COMPLETE, Arguments.createMap()) // Send completion for the whole list
-                                }
-                            }
-                        } else {
-                            // Single video logic (ExoPlayer handles looping via repeatMode)
-                            if (!loop) {
-                                // Send completion event only if not looping a single video
-                                sendEvent(EVENT_COMPLETE, Arguments.createMap())
-                            } else {
-                                Log.d(TAG, "Single video ended and loop is ON - ExoPlayer will repeat.")
-                                // Optionally send an event here if needed for single loop cycle completion
-                            }
+                        // ExoPlayer handles looping via repeatMode
+                        if (!loop) {
+                            sendEvent(EVENT_COMPLETE, Arguments.createMap())
                         }
                     }
                     Player.STATE_BUFFERING -> {
@@ -285,26 +238,15 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
         Log.d(TAG, "Loading video source: $url")
         try {
             val mediaItem = MediaItem.fromUri(url)
-            player?.stop() // Stop previous playback
-            player?.clearMediaItems() // Clear previous items
+            player?.stop()
+            player?.clearMediaItems()
             player?.setMediaItem(mediaItem)
             player?.prepare()
-            player?.playWhenReady = autoplay && !isPaused // Apply autoplay and paused state
-            
-            // Explicitly set repeat mode here based on current state
-            if (isPlaylist) {
-                 player?.repeatMode = Player.REPEAT_MODE_OFF // Force OFF for playlists
-            } else {
-                 player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF // Use loop prop for single videos
-             }
+            player?.playWhenReady = autoplay && !isPaused
+            player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
 
-            Log.d(TAG, "ExoPlayer configured with URL: $url, autoplay: $autoplay, loop: $loop, isPaused: $isPaused, repeatMode: ${player?.repeatMode}")
-            // Send load start event, include index if it's a playlist
-            val loadStartEvent = Arguments.createMap()
-            if (isPlaylist) {
-                loadStartEvent.putInt("index", currentVideoIndex)
-            }
-            sendEvent(EVENT_LOAD_START, loadStartEvent) 
+            Log.d(TAG, "ExoPlayer configured with URL: $url, autoplay: $autoplay, loop: $loop, isPaused: $isPaused")
+            sendEvent(EVENT_LOAD_START, Arguments.createMap())
 
         } catch (e: Exception) {
             Log.e(TAG, "Error setting video source: ${e.message}", e)
@@ -315,52 +257,17 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
         }
     }
 
-    // Method to load a specific video from the playlist
-    private fun loadVideoAtIndex(index: Int) {
-        if (index >= 0 && index < videoUrls.size) {
-            currentVideoIndex = index
-            val url = videoUrls[index]
-            Log.d(TAG, "Loading playlist item at index $index: $url")
+    fun setVideoUrl(url: String?) {
+        Log.d(TAG, "Setting video URL: $url")
+        if (url != null && url.isNotEmpty()) {
+            videoUrl = url
             loadVideoSource(url)
         } else {
-            Log.e(TAG, "Invalid index $index for playlist size ${videoUrls.size}")
-        }
-    }
-
-    // Called by ViewManager for single URL
-    fun setVideoUrl(url: String?) {
-        Log.d(TAG, "Setting single video URL: $url")
-        isPlaylist = false // Mark as not a playlist
-        videoUrls = emptyList() // Clear any previous playlist
-        currentVideoIndex = 0
-
-        if (url != null && url.isNotEmpty()) { // Check for non-null and non-empty
-            videoUrl = url // Store the non-null url
-            loadVideoSource(url) // Call loadVideoSource only when url is guaranteed non-null
-        } else {
-            Log.w(TAG, "Received null or empty URL for single video.")
+            Log.w(TAG, "Received null or empty URL")
             player?.stop()
             player?.clearMediaItems()
-            videoUrl = null // Ensure internal state is cleared
-            // Optionally show thumbnail or placeholder if URL is cleared
+            videoUrl = null
         }
-    }
-
-    // Called by ViewManager for URL list (playlist)
-    fun setVideoUrls(urls: List<String>) {
-        Log.d(TAG, "Setting video URL list (playlist) with ${urls.size} items.")
-        if (urls.isEmpty()) {
-            Log.w(TAG, "Received empty URL list.")
-            setVideoUrl(null) // Treat empty list as clearing the source
-            return
-        }
-        isPlaylist = true // Mark as a playlist
-        videoUrl = null // Clear single video URL
-        videoUrls = urls
-        currentVideoIndex = 0 // Start from the beginning
-
-        // Load the first video in the playlist
-        loadVideoAtIndex(currentVideoIndex)
     }
 
     fun setAutoplay(value: Boolean) {
@@ -369,17 +276,9 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
     }
 
     fun setLoop(value: Boolean) {
-        Log.d(TAG, "Setting loop to: $value, isPlaylist: $isPlaylist")
+        Log.d(TAG, "Setting loop to: $value")
         loop = value
-        // Only set ExoPlayer's repeatMode if NOT in playlist mode.
-        // Playlist looping is handled manually in onPlaybackStateChanged.
-        if (!isPlaylist) {
-             // Use REPEAT_MODE_ONE for single item looping
-             player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-        } else {
-             // Ensure repeat mode is off when handling playlists manually
-             player?.repeatMode = Player.REPEAT_MODE_OFF
-        }
+        player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
     fun setThumbnailUrl(url: String?) {
@@ -881,75 +780,7 @@ bitmap.let {
     }
     
     private fun cleanupRecording() {
-        try {
-            videoEncoder?.stop()
-            videoEncoder?.release()
-            videoEncoder = null
-            
-            recordingSurface?.release()
-            recordingSurface = null
-            
-            mediaRecorder?.stop()
-            mediaRecorder?.release()
-            mediaRecorder = null
-            
-            videoTrackIndex = -1
-            isRecording = false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error cleaning up recording resources: ${e.message}", e)
-        }
-    }
-    
-    private inner class RecordingRunnable : Runnable {
-        override fun run() {
-            try {
-                // Add video track to muxer
-                val videoFormat = videoEncoder?.outputFormat
-                if (videoFormat != null && mediaRecorder != null) {
-                    videoTrackIndex = mediaRecorder!!.addTrack(videoFormat)
-                } else {
-                    Log.e(TAG, "Cannot add track: videoFormat or mediaRecorder is null")
-                    videoTrackIndex = -1
-                }
-                
-                // Start the muxer
-                mediaRecorder?.start()
-                
-                // Process encoding
-                while (isRecording) {
-                    val encoderStatus = videoEncoder?.dequeueOutputBuffer(bufferInfo, 10000) ?: -1
-                    
-                    if (encoderStatus >= 0) {
-                        val encodedData = videoEncoder?.getOutputBuffer(encoderStatus)
-                        
-                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                            // Ignore codec config data
-                            bufferInfo.size = 0
-                        }
-                        
-                        if (bufferInfo.size > 0 && encodedData != null && mediaRecorder != null && videoTrackIndex >= 0) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            
-                            mediaRecorder!!.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
-                        }
-                        
-                        videoEncoder?.releaseOutputBuffer(encoderStatus, false)
-                        
-                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                            break
-                        }
-                    } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        // Handle format change if needed
-                    }
-                }
-                
-                // Signal end of stream to encoder
-                videoEncoder?.signalEndOfInputStream()
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in recording thread: ${e.message}", e)
-            }
-        }
+        isRecording = false
+        outputPath = null
     }
 }

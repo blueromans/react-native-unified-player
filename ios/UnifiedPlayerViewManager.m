@@ -32,10 +32,6 @@
         _player = [[VLCMediaPlayer alloc] init];
         _player.delegate = self;
 
-        // Initialize playlist properties (only needed for type checking in manager)
-        _videoUrlArray = nil;
-        _currentVideoIndex = 0;
-        _isPlaylist = NO; // This will be set by setup methods
 
         // Make sure we're visible and properly laid out
         self.backgroundColor = [UIColor blackColor];
@@ -211,27 +207,23 @@
 }
 
 - (void)sendEvent:(NSString *)eventName body:(NSDictionary *)body {
-    // Map event names to their corresponding callback properties
-    if ([eventName isEqualToString:@"onLoadStart"] && self.onLoadStart) {
-        self.onLoadStart(body);
-    } else if ([eventName isEqualToString:@"onReadyToPlay"] && self.onReadyToPlay) {
-        self.onReadyToPlay(body);
-    } else if ([eventName isEqualToString:@"onError"] && self.onError) {
-        self.onError(body);
-    } else if ([eventName isEqualToString:@"onProgress"] && self.onProgress) {
-        self.onProgress(body);
-    } else if ([eventName isEqualToString:@"onPlaybackComplete"] && self.onPlaybackComplete) {
-        self.onPlaybackComplete(body);
-    } else if ([eventName isEqualToString:@"onPlaybackStalled"] && self.onPlaybackStalled) {
-        self.onPlaybackStalled(body);
-    } else if ([eventName isEqualToString:@"onPlaybackResumed"] && self.onPlaybackResumed) {
-        self.onPlaybackResumed(body);
-    } else if ([eventName isEqualToString:@"onPlaying"] && self.onPlaying) {
-        self.onPlaying(body);
-    } else if ([eventName isEqualToString:@"onPaused"] && self.onPaused) {
-        self.onPaused(body);
-    } else {
-         RCTLogInfo(@"[UnifiedPlayerViewManager] No direct event block found for event: %@", eventName);
+    // Dictionary-based event dispatch for O(1) lookup
+    NSDictionary<NSString *, RCTDirectEventBlock> *eventHandlers = @{
+        @"onLoadStart": self.onLoadStart ?: (id)[NSNull null],
+        @"onReadyToPlay": self.onReadyToPlay ?: (id)[NSNull null],
+        @"onError": self.onError ?: (id)[NSNull null],
+        @"onProgress": self.onProgress ?: (id)[NSNull null],
+        @"onPlaybackComplete": self.onPlaybackComplete ?: (id)[NSNull null],
+        @"onPlaybackStalled": self.onPlaybackStalled ?: (id)[NSNull null],
+        @"onPlaybackResumed": self.onPlaybackResumed ?: (id)[NSNull null],
+        @"onPlaying": self.onPlaying ?: (id)[NSNull null],
+        @"onPaused": self.onPaused ?: (id)[NSNull null],
+        @"onFullscreenChanged": self.onFullscreenChanged ?: (id)[NSNull null],
+    };
+
+    RCTDirectEventBlock handler = eventHandlers[eventName];
+    if (handler && handler != (id)[NSNull null]) {
+        handler(body);
     }
 }
 
@@ -334,71 +326,17 @@
     });
 }
 
-// Helper method to load a video from the playlist by index (only used internally now)
-- (void)loadVideoAtIndex:(NSInteger)index {
-    if (index >= 0 && index < _videoUrlArray.count) {
-        _currentVideoIndex = index; // Keep track internally
-        NSString *urlString = _videoUrlArray[index];
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Loading playlist item at index %ld: %@", (long)index, urlString);
-        [self loadVideoSource:urlString];
-    } else {
-        RCTLogError(@"[UnifiedPlayerViewManager] Invalid index %ld for playlist size %lu", (long)index, (unsigned long)_videoUrlArray.count);
-    }
-}
-
-// Setup for single video URL
+// Setup video URL
 - (void)setupWithVideoUrlString:(nullable NSString *)videoUrlString {
     RCTLogInfo(@"[UnifiedPlayerViewManager] setupWithVideoUrlString: %@", videoUrlString);
-
-    // Reset playlist state
-    _isPlaylist = NO;
-    _videoUrlArray = nil;
-    _currentVideoIndex = 0;
-
-    _videoUrlString = [videoUrlString copy]; // Store the single URL
+    _videoUrlString = [videoUrlString copy];
 
     if (videoUrlString && videoUrlString.length > 0) {
         [self loadVideoSource:videoUrlString];
     } else {
-        // Clear player if URL is nil or empty
         [_player stop];
         _player.media = nil;
-        // Optionally show thumbnail or placeholder
     }
-}
-
-// Setup for playlist (array of URLs)
-- (void)setupWithVideoUrlArray:(NSArray<NSString *> *)urlArray {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] setupWithVideoUrlArray with %lu items", (unsigned long)urlArray.count);
-
-    if (!urlArray || urlArray.count == 0) {
-        RCTLogWarn(@"[UnifiedPlayerViewManager] Received empty or nil URL array.");
-        [self setupWithVideoUrlString:nil]; // Treat empty array as clearing the source
-        return;
-    }
-
-    // Set playlist state
-    _isPlaylist = YES;
-    _videoUrlString = nil; // Clear single URL
-    _videoUrlArray = [urlArray copy];
-    _currentVideoIndex = 0; // Start from the beginning
-
-    // Load the first video in the playlist
-    // The actual URL passed to the component will be managed by JS
-    [self loadVideoAtIndex:_currentVideoIndex];
-}
-
-// This method is now deprecated in favor of loadVideoSource:
-- (void)loadVideo {
-     RCTLogWarn(@"[UnifiedPlayerViewManager] loadVideo method is deprecated. Use setup methods instead.");
-     // If called directly, load based on current state
-     if (_isPlaylist && _videoUrlArray.count > 0) {
-         [self loadVideoAtIndex:_currentVideoIndex];
-     } else if (_videoUrlString) {
-         [self loadVideoSource:_videoUrlString];
-     } else {
-         RCTLogWarn(@"[UnifiedPlayerViewManager] loadVideo called with no source set.");
-     }
 }
 
 - (void)play {
@@ -968,9 +906,9 @@
              RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateEnded");
              // Send completion event. Looping/advancement will be handled in JS.
              [self sendEvent:@"onPlaybackComplete" body:@{}];
-             // Simple loop handling for single video if needed (VLC might handle this internally?)
-             if (!_isPlaylist && _loop) {
-                  RCTLogInfo(@"[UnifiedPlayerViewManager] Looping single video (iOS)");
+             // Simple loop handling
+             if (_loop) {
+                  RCTLogInfo(@"[UnifiedPlayerViewManager] Looping video (iOS)");
                   [_player stop];
                   [_player play];
              }
@@ -981,7 +919,7 @@
             [self sendEvent:@"onError" body:@{
                 @"code": @"PLAYBACK_ERROR",
                 @"message": @"VLC player encountered an error",
-                @"details": @{@"url": _videoUrlString ?: (_videoUrlArray ? [_videoUrlArray description] : @"")}
+                @"details": @{@"url": _videoUrlString ?: @""}
             }];
             break;
 
@@ -1070,38 +1008,16 @@ RCT_EXPORT_MODULE(UnifiedPlayerView)
     return playerView;
 }
 
-// Video URL property (accepts NSString or NSArray<NSString *>)
-RCT_CUSTOM_VIEW_PROPERTY(videoUrl, id, UnifiedPlayerUIView)
+// Video URL property
+RCT_CUSTOM_VIEW_PROPERTY(videoUrl, NSString, UnifiedPlayerUIView)
 {
     if ([json isKindOfClass:[NSString class]]) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Received videoUrl as NSString");
         [view setupWithVideoUrlString:(NSString *)json];
-    } else if ([json isKindOfClass:[NSArray class]]) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Received videoUrl as NSArray");
-        // Validate that the array contains strings
-        NSArray *urlArray = (NSArray *)json;
-        BOOL isValidArray = YES;
-        for (id item in urlArray) {
-            if (![item isKindOfClass:[NSString class]]) {
-                isValidArray = NO;
-                break;
-            }
-        }
-
-        if (isValidArray) {
-            // Pass the array, but the view will only load the first item initially.
-            // JS layer will manage changing the source via props.
-            [view setupWithVideoUrlArray:urlArray]; 
-        } else {
-            RCTLogError(@"[UnifiedPlayerViewManager] Invalid videoUrl array: contains non-string elements.");
-             [view setupWithVideoUrlString:nil]; // Clear the player
-        }
     } else if (json == nil || json == [NSNull null]) {
-         RCTLogInfo(@"[UnifiedPlayerViewManager] Received nil videoUrl");
-         [view setupWithVideoUrlString:nil]; // Handle null case
+        [view setupWithVideoUrlString:nil];
     } else {
-        RCTLogError(@"[UnifiedPlayerViewManager] Invalid type for videoUrl prop. Expected NSString or NSArray.");
-        [view setupWithVideoUrlString:nil]; // Clear the player
+        RCTLogError(@"[UnifiedPlayerViewManager] Invalid type for videoUrl prop. Expected NSString.");
+        [view setupWithVideoUrlString:nil];
     }
 }
 

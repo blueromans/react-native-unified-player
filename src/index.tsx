@@ -1,9 +1,10 @@
-import { type ElementRef, forwardRef } from 'react'; // Import from 'react'
+import { forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import {
   requireNativeComponent,
   UIManager,
   NativeModules,
   Platform,
+  findNodeHandle,
   type ViewStyle,
 } from 'react-native';
 
@@ -22,57 +23,79 @@ if (
   throw new Error(LINKING_ERROR);
 }
 
-// Define the props for the UnifiedPlayerView component
+/**
+ * Error type for player-related errors
+ */
+export interface PlayerError {
+  code: string;
+  message: string;
+  nativeError?: unknown;
+}
+
+/**
+ * Methods available on the player ref
+ */
+export interface UnifiedPlayerRef {
+  /** Start playback */
+  play: () => Promise<boolean>;
+  /** Pause playback */
+  pause: () => Promise<boolean>;
+  /** Seek to a specific time in seconds */
+  seekTo: (time: number) => Promise<boolean>;
+  /** Get current playback time in seconds */
+  getCurrentTime: () => Promise<number>;
+  /** Get video duration in seconds */
+  getDuration: () => Promise<number>;
+  /** Capture the current video frame as a base64 encoded image */
+  capture: () => Promise<string>;
+  /**
+   * Start recording/downloading the video.
+   * Note: On Android, this downloads the source file rather than recording rendered video.
+   */
+  startRecording: (outputPath?: string) => Promise<boolean>;
+  /** Stop recording and get the path of the saved file */
+  stopRecording: () => Promise<string>;
+  /** Toggle fullscreen mode */
+  toggleFullscreen: (isFullscreen: boolean) => Promise<boolean>;
+}
+
+/**
+ * Props for the UnifiedPlayerView component
+ */
 export type UnifiedPlayerProps = {
-  // Video source URL or list of URLs for playlist
-  videoUrl: string | string[];
-
-  // Thumbnail image URL to display until video starts playing
+  /** Video source URL */
+  videoUrl: string;
+  /** Thumbnail image URL to display until video starts playing */
   thumbnailUrl?: string;
-
-  // Apply custom styling
+  /** Apply custom styling */
   style: ViewStyle;
-
-  // Autoplay video when loaded
+  /** Autoplay video when loaded */
   autoplay?: boolean;
-
-  // Should video loop when finished
+  /** Should video loop when finished */
   loop?: boolean;
-
-  // Is the player currently paused
+  /** Is the player currently paused */
   isPaused?: boolean;
-
-  // Callback when video begins loading (includes index for playlists)
-  onLoadStart?: (event: { nativeEvent?: { index?: number } }) => void;
-
-  // Callback when video is ready to play
+  /** Callback when video begins loading */
+  onLoadStart?: () => void;
+  /** Callback when video is ready to play */
   onReadyToPlay?: () => void;
-
-  // Callback when an error occurs
-  onError?: (error: any) => void;
-
-  // Callback when video playback finishes
+  /** Callback when an error occurs */
+  onError?: (error: PlayerError) => void;
+  /** Callback when video playback finishes */
   onPlaybackComplete?: () => void;
-
-  // Callback for playback progress
+  /** Callback for playback progress */
   onProgress?: (data: { currentTime: number; duration: number }) => void;
-
-  // Callback when playback is stalled (buffering)
+  /** Callback when playback is stalled (buffering) */
   onPlaybackStalled?: () => void;
-
-  // Callback when playback resumes after stalling
+  /** Callback when playback resumes after stalling */
   onPlaybackResumed?: () => void;
-
-  // Callback when playback is paused
+  /** Callback when playback is paused */
   onPaused?: () => void;
-
-  // Callback when playback is playing
+  /** Callback when playback is playing */
   onPlaying?: () => void;
-
-  // Fullscreen mode - automatically rotates to landscape when true
+  /** Fullscreen mode - automatically rotates to landscape when true */
   isFullscreen?: boolean;
-
-  // Callback when fullscreen state changes
+  /** Callback when fullscreen state changes */
   onFullscreenChanged?: (isFullscreen: boolean) => void;
 };
 
@@ -80,10 +103,8 @@ export type UnifiedPlayerProps = {
 const NativeUnifiedPlayerView =
   requireNativeComponent<UnifiedPlayerProps>('UnifiedPlayerView');
 
-// Newline added here
-
 // Native module for player control methods
-const UnifiedPlayerModule = NativeModules.UnifiedPlayer;
+const NativeModule = NativeModules.UnifiedPlayer;
 
 // Export event types for reference
 export const UnifiedPlayerEventTypes = {
@@ -96,277 +117,110 @@ export const UnifiedPlayerEventTypes = {
   RESUMED: 'onPlaybackResumed',
   PLAYING: 'onPlaying',
   PAUSED: 'onPaused',
-};
-
-// Export events emitter for event listeners
-export const UnifiedPlayerEvents = NativeModules.UnifiedPlayer;
+} as const;
 
 /**
- * UnifiedPlayerView component for video playback
+ * UnifiedPlayerView component for video playback.
+ *
+ * @example
+ * ```tsx
+ * const playerRef = useRef<UnifiedPlayerRef>(null);
+ *
+ * // Control playback
+ * await playerRef.current?.play();
+ * await playerRef.current?.pause();
+ * await playerRef.current?.seekTo(30);
+ *
+ * // Get player state
+ * const currentTime = await playerRef.current?.getCurrentTime();
+ * const duration = await playerRef.current?.getDuration();
+ *
+ * // Capture frame
+ * const base64Image = await playerRef.current?.capture();
+ *
+ * return (
+ *   <UnifiedPlayerView
+ *     ref={playerRef}
+ *     videoUrl="https://example.com/video.mp4"
+ *     style={{ width: '100%', height: 300 }}
+ *     autoplay
+ *   />
+ * );
+ * ```
  */
 export const UnifiedPlayerView = forwardRef<
-  ElementRef<typeof NativeUnifiedPlayerView>,
+  UnifiedPlayerRef,
   UnifiedPlayerProps
 >((props, ref) => {
-  return <NativeUnifiedPlayerView {...props} ref={ref} />;
+  const nativeRef = useRef<any>(null);
+
+  const getViewTag = useCallback((): number | null => {
+    return findNodeHandle(nativeRef.current);
+  }, []);
+
+  const callNativeMethod = useCallback(
+    async <T,>(
+      methodName: string,
+      method: (viewTag: number, ...args: any[]) => Promise<T>,
+      ...args: any[]
+    ): Promise<T> => {
+      const viewTag = getViewTag();
+      if (viewTag === null) {
+        throw new Error('Player view not found');
+      }
+
+      if (__DEV__) {
+        console.log(`UnifiedPlayer.${methodName} called`);
+      }
+
+      try {
+        const result = await method(viewTag, ...args);
+        if (__DEV__) {
+          console.log(`${methodName} completed successfully`);
+        }
+        return result;
+      } catch (error) {
+        if (__DEV__) {
+          console.error(
+            `Error in ${methodName}:`,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+        throw error;
+      }
+    },
+    [getViewTag]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      play: () => callNativeMethod('play', NativeModule.play),
+      pause: () => callNativeMethod('pause', NativeModule.pause),
+      seekTo: (time: number) =>
+        callNativeMethod('seekTo', NativeModule.seekTo, time),
+      getCurrentTime: () =>
+        callNativeMethod('getCurrentTime', NativeModule.getCurrentTime),
+      getDuration: () =>
+        callNativeMethod('getDuration', NativeModule.getDuration),
+      capture: () => callNativeMethod('capture', NativeModule.capture),
+      startRecording: (outputPath?: string) =>
+        callNativeMethod(
+          'startRecording',
+          NativeModule.startRecording,
+          outputPath
+        ),
+      stopRecording: () =>
+        callNativeMethod('stopRecording', NativeModule.stopRecording),
+      toggleFullscreen: (isFullscreen: boolean) =>
+        callNativeMethod(
+          'toggleFullscreen',
+          NativeModule.toggleFullscreen,
+          isFullscreen
+        ),
+    }),
+    [callNativeMethod]
+  );
+
+  return <NativeUnifiedPlayerView {...props} ref={nativeRef} />;
 });
-
-/**
- * API methods for controlling playback
- */
-export const UnifiedPlayer = {
-  /**
-   * Start playback
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to true if successful
-   */
-  play: (viewTag: number): Promise<boolean> => {
-    try {
-      console.log('UnifiedPlayer.play called with viewTag:', viewTag);
-      return UnifiedPlayerModule.play(viewTag)
-        .then((result: boolean) => {
-          console.log('Native play method called successfully');
-          return result;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling play:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling play:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Pause playback
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to true if successful
-   */
-  pause: (viewTag: number): Promise<boolean> => {
-    try {
-      console.log('UnifiedPlayer.pause called with viewTag:', viewTag);
-      return UnifiedPlayerModule.pause(viewTag)
-        .then((result: boolean) => {
-          console.log('Native pause method called successfully');
-          return result;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling pause:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling pause:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Seek to a specific time
-   * @param viewTag - The tag of the player view
-   * @param time - Time in seconds to seek to
-   * @returns Promise resolving to true if successful
-   */
-  seekTo: (viewTag: number, time: number): Promise<boolean> => {
-    try {
-      console.log(
-        'UnifiedPlayer.seekTo called with viewTag:',
-        viewTag,
-        'time:',
-        time
-      );
-      return UnifiedPlayerModule.seekTo(viewTag, time)
-        .then((result: boolean) => {
-          console.log('Native seekTo method called successfully');
-          return result;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling seekTo:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling seekTo:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Get current playback time
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to current time in seconds
-   */
-  getCurrentTime: (viewTag: number): Promise<number> => {
-    try {
-      console.log('UnifiedPlayer.getCurrentTime called with viewTag:', viewTag);
-      return UnifiedPlayerModule.getCurrentTime(viewTag);
-    } catch (error) {
-      console.log(
-        'Error calling getCurrentTime:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Get video duration
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to duration in seconds
-   */
-  getDuration: (viewTag: number): Promise<number> => {
-    try {
-      console.log('UnifiedPlayer.getDuration called with viewTag:', viewTag);
-      return UnifiedPlayerModule.getDuration(viewTag);
-    } catch (error) {
-      console.log(
-        'Error calling getDuration:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Capture the current video frame as a base64 encoded image
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to the base64 encoded image string
-   */
-  capture: (viewTag: number): Promise<string> => {
-    try {
-      console.log('UnifiedPlayer.capture called with viewTag:', viewTag);
-      return UnifiedPlayerModule.capture(viewTag)
-        .then((base64String: string) => {
-          console.log('Native capture method called successfully');
-          return base64String;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling capture:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling capture:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Start recording the video
-   * @param viewTag - The tag of the player view
-   * @param outputPath - Optional path where to save the recording (platform-specific)
-   * @returns Promise resolving to true if recording started successfully
-   */
-  startRecording: (viewTag: number, outputPath?: string): Promise<boolean> => {
-    try {
-      console.log('UnifiedPlayer.startRecording called with viewTag:', viewTag);
-      return UnifiedPlayerModule.startRecording(viewTag, outputPath)
-        .then((result: boolean) => {
-          console.log('Native startRecording method called successfully');
-          return result;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling startRecording:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling startRecording:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Toggle fullscreen mode
-   * @param viewTag - The tag of the player view
-   * @param isFullscreen - Whether to enter or exit fullscreen mode
-   * @returns Promise resolving to true if successful
-   */
-  toggleFullscreen: (
-    viewTag: number,
-    isFullscreen: boolean
-  ): Promise<boolean> => {
-    try {
-      console.log(
-        'UnifiedPlayer.toggleFullscreen called with viewTag:',
-        viewTag,
-        'isFullscreen:',
-        isFullscreen
-      );
-      return UnifiedPlayerModule.toggleFullscreen(viewTag, isFullscreen)
-        .then((result: boolean) => {
-          console.log('Native toggleFullscreen method called successfully');
-          return result;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling toggleFullscreen:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling toggleFullscreen:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-
-  /**
-   * Stop recording the video
-   * @param viewTag - The tag of the player view
-   * @returns Promise resolving to the path of the saved recording
-   */
-  stopRecording: (viewTag: number): Promise<string> => {
-    try {
-      console.log('UnifiedPlayer.stopRecording called with viewTag:', viewTag);
-      return UnifiedPlayerModule.stopRecording(viewTag)
-        .then((filePath: string) => {
-          console.log('Native stopRecording method called successfully');
-          return filePath;
-        })
-        .catch((error: any) => {
-          console.log(
-            'Error calling stopRecording:',
-            error instanceof Error ? error.message : String(error)
-          );
-          throw error;
-        });
-    } catch (error) {
-      console.log(
-        'Error calling stopRecording:',
-        error instanceof Error ? error.message : String(error)
-      );
-      return Promise.reject(error);
-    }
-  },
-};
