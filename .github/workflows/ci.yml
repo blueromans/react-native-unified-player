@@ -79,11 +79,12 @@ jobs:
               git config user.name "github-actions[bot]"
               git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          - name: Fetch latest changes
-            run: |
-              git fetch origin main --tags
-              git checkout main
-              git pull --rebase origin main || true
+      - name: Fetch latest changes and rebase
+        run: |
+          git fetch origin main --tags --force
+          git checkout main
+          git pull --rebase origin main || echo "No changes to pull"
+          git fetch origin --tags --force
 
           - name: Setup npm for publishing
         uses: actions/setup-node@v4
