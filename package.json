@@ -107,7 +107,9 @@
     "git": {
       "commitMessage": "chore: release ${version}",
       "tagName": "v${version}",
-      "requireCleanWorkingDir": false
+      "requireCleanWorkingDir": false,
+      "push": true,
+      "pushArgs": ["--force-with-lease"]
     },
     "npm": {
       "publish": true,
