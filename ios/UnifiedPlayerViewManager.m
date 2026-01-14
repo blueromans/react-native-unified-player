@@ -530,10 +530,75 @@
 #pragma mark - Recording (Placeholder - can be implemented later)
 
 - (void)captureFrameWithCompletion:(void (^)(NSString * _Nullable base64String, NSError * _Nullable error))completion {
-    // Placeholder implementation
-    if (completion) {
-        completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Not implemented"}]);
+    if (!completion) {
+        return;
     }
+    
+    if (!_playerItem || _playerItem.status != AVPlayerItemStatusReadyToPlay) {
+        completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" 
+                                             code:1 
+                                         userInfo:@{NSLocalizedDescriptionKey: @"Player item not ready"}]);
+        return;
+    }
+    
+    if (!_playerLayer) {
+        completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" 
+                                             code:2 
+                                         userInfo:@{NSLocalizedDescriptionKey: @"Player layer not available"}]);
+        return;
+    }
+    
+    // Use AVAssetImageGenerator to capture the current frame
+    AVAssetImageGenerator *imageGenerator = [[AVAssetImageGenerator alloc] initWithAsset:_playerItem.asset];
+    imageGenerator.appliesPreferredTrackTransform = YES;
+    imageGenerator.requestedTimeToleranceBefore = kCMTimeZero;
+    imageGenerator.requestedTimeToleranceAfter = kCMTimeZero;
+    
+    CMTime currentTime = _player.currentTime;
+    if (!CMTIME_IS_VALID(currentTime)) {
+        currentTime = kCMTimeZero;
+    }
+    
+    // Generate the image
+    [imageGenerator generateCGImagesAsynchronouslyForTimes:@[[NSValue valueWithCMTime:currentTime]]
+                                          completionHandler:^(CMTime requestedTime, CGImageRef image, CMTime actualTime, AVAssetImageGeneratorResult result, NSError *error) {
+        if (error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
+            return;
+        }
+        
+        if (result != AVAssetImageGeneratorSucceeded || !image) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" 
+                                                     code:3 
+                                                 userInfo:@{NSLocalizedDescriptionKey: @"Failed to generate image"}]);
+            });
+            return;
+        }
+        
+        // Convert CGImage to UIImage
+        UIImage *uiImage = [UIImage imageWithCGImage:image];
+        
+        // Convert to JPEG data
+        NSData *imageData = UIImageJPEGRepresentation(uiImage, 0.8);
+        if (!imageData) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" 
+                                                     code:4 
+                                                 userInfo:@{NSLocalizedDescriptionKey: @"Failed to convert image to JPEG"}]);
+            });
+            return;
+        }
+        
+        // Encode to base64
+        NSString *base64String = [imageData base64EncodedStringWithOptions:0];
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(base64String, nil);
+        });
+    }];
 }
 
 - (void)captureFrameForRecording {
