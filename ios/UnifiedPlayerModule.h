@@ -1,6 +1,6 @@
 #import <React/RCTEventEmitter.h>
 #import <React/RCTBridgeModule.h>
-#import <MobileVLCKit/MobileVLCKit.h> // Import MobileVLCKit
+#import <AVFoundation/AVFoundation.h> // Import MobileVLCKit
 
 // Forward declaration for UnifiedPlayerUIView
 @class UnifiedPlayerUIView;
