@@ -57,6 +57,7 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
     private var thumbnailUrl: String? = null
     private var autoplay: Boolean = true
     private var loop: Boolean = false
+    private var speed: Float = 1.0f // Default playback speed
     private var textureView: android.view.TextureView
     private var thumbnailImageView: ImageView? = null
     internal var player: ExoPlayer? = null
@@ -157,6 +158,11 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
                             sendEvent(EVENT_COMPLETE, Arguments.createMap())
                         } else {
                             Log.d(TAG, "Looping enabled, not sending completion event")
+                            // Ensure playback speed is preserved after loop
+                            if (speed != 1.0f && player != null) {
+                                player?.setPlaybackSpeed(speed)
+                                Log.d(TAG, "Restored playback speed: $speed after loop")
+                            }
                         }
                     }
                     Player.STATE_BUFFERING -> {
@@ -248,8 +254,12 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
             player?.prepare()
             player?.playWhenReady = autoplay && !isPaused
             player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            // Apply playback speed if set
+            if (speed != 1.0f) {
+                player?.setPlaybackSpeed(speed)
+            }
 
-            Log.d(TAG, "ExoPlayer configured with URL: $url, autoplay: $autoplay, loop: $loop, isPaused: $isPaused")
+            Log.d(TAG, "ExoPlayer configured with URL: $url, autoplay: $autoplay, loop: $loop, isPaused: $isPaused, speed: $speed")
             sendEvent(EVENT_LOAD_START, Arguments.createMap())
 
         } catch (e: Exception) {
@@ -436,6 +446,10 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
     fun play() {
         Log.d(TAG, "Play method called")
         player?.playWhenReady = true
+        // Ensure playback speed is applied when playing
+        if (speed != 1.0f) {
+            player?.setPlaybackSpeed(speed)
+        }
     }
 
     fun pause() {
@@ -455,8 +469,9 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
         } ?: Log.e(TAG, "Cannot seek: player is null")
     }
 
-    fun setSpeed(speed: Float) {
-        Log.d(TAG, "SetSpeed method called with speed: $speed")
+    fun setSpeed(speedValue: Float) {
+        Log.d(TAG, "SetSpeed method called with speed: $speedValue")
+        speed = speedValue // Store the speed value
         player?.let {
             it.setPlaybackSpeed(speed)
             Log.d(TAG, "Playback speed set to: $speed")
