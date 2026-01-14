@@ -109,7 +109,19 @@ jobs:
         run: yarn prepare
 
       - name: Create Release and Publish
-        run: yarn run release --ci
+        run: |
+          # Check if version already exists in npm
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view react-native-unified-player@${CURRENT_VERSION} version > /dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} already published, skipping npm publish"
+            # Only create git tag and release if not exists
+            if ! git rev-parse "v${CURRENT_VERSION}" > /dev/null 2>&1; then
+              git tag "v${CURRENT_VERSION}"
+              git push origin "v${CURRENT_VERSION}" || true
+            fi
+          else
+            yarn run release --ci
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # NPM_TOKEN: Granular access token with publish permissions
