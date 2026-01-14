@@ -194,6 +194,7 @@ jobs:
           # NPM_TOKEN must be a granular access token (not classic token)
           # Create one at: https://www.npmjs.com/settings/YOUR_USERNAME/access-tokens
           # Required permissions: Read and Write packages
+          # CRITICAL: Must enable "Bypass 2FA" option for CI/CD automation
           # Token type: Granular Access Token (Automation)
           # Note: Classic tokens are no longer supported as of Dec 2025
         env:

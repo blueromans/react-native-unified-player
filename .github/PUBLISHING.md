@@ -14,9 +14,12 @@ Since npm revoked classic tokens (December 2025), you need to create a **Granula
 4. Choose "Automation" as the token type
 5. Set permissions:
    - **Read and Write packages** (required for publishing)
+   - **IMPORTANT**: Enable "Bypass 2FA" option (required for CI/CD automation)
    - Set expiration as needed (recommended: 1 year or custom)
 6. Click "Generate Token"
 7. **Copy the token immediately** (you won't be able to see it again)
+
+**Critical**: The token MUST have "Bypass 2FA" enabled, otherwise npm will require a one-time password during publishing, which cannot be automated.
 
 ### 2. Add Token to GitHub Secrets
 
@@ -67,6 +70,14 @@ Use [Conventional Commits](https://www.conventionalcommits.org/) format:
 - Ensure 2FA is enabled on your npm account
 - Check that the token hasn't expired
 - Verify the token is a Granular Access Token (not classic)
+
+### "EOTP - one-time password required" Error
+
+- **This means your token doesn't have "Bypass 2FA" enabled**
+- Go to https://www.npmjs.com/settings/YOUR_USERNAME/access-tokens
+- Find your token and edit it, or create a new one
+- **Enable "Bypass 2FA" option** (required for CI/CD automation)
+- Update the `NPM_TOKEN` secret in GitHub with the new token
 
 ### "No version bump" Message
 
