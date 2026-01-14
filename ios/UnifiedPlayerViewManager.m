@@ -495,20 +495,31 @@
 #pragma mark - Notifications
 
 - (void)playerItemDidReachEnd:(NSNotification *)notification {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, loop: %@", _loop ? @"YES" : @"NO");
-    
-        if (_loop) {
+    RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, loop: %@, speed: %f", _loop ? @"YES" : @"NO", _speed);
+        
+    if (_loop) {
+        // Store current speed before seeking
+        float savedSpeed = _speed;
+        
         // Seek to beginning and play again
             [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished) {
                 if (finished) {
                     [self->_player play];
                 // Restore playback speed AFTER play() is called
-                // Use a small delay to ensure play() has started
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    if (self->_speed > 0 && self->_speed != 1.0f) {
-                        float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
+                // Use multiple attempts to ensure speed is set
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (savedSpeed > 0 && savedSpeed != 1.0f) {
+                        float validSpeed = MAX(0.25f, MIN(4.0f, savedSpeed));
                         self->_player.rate = validSpeed;
-                        RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop", validSpeed);
+                        RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop (attempt 1)", validSpeed);
+                        
+                        // Double-check after a bit more time
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            if (self->_player.rate != validSpeed && self->_player.rate > 0) {
+                                self->_player.rate = validSpeed;
+                                RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop (attempt 2)", validSpeed);
+                            }
+                        });
                     }
                 });
                 RCTLogInfo(@"[UnifiedPlayerViewManager] Looped video - restarted from beginning");
