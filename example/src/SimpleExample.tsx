@@ -81,6 +81,7 @@ export function SimpleExample({ onSwitchToFull }: SimpleExampleProps) {
         ref={playerRef}
         videoUrl={VIDEO_URL}
         autoplay
+        loop
         style={styles.player}
         onProgress={(data: any) => {
           // Handle both direct data and nativeEvent wrapper

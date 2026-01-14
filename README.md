@@ -151,6 +151,10 @@ Control playback using the `UnifiedPlayer` object and the native tag of the `Uni
    yarn android  # for Android
    ```
 
+## Publishing
+
+This package is automatically published to npm when changes are pushed to the `main` or `master` branch. See [PUBLISHING.md](.github/PUBLISHING.md) for setup instructions and details about npm's new authentication system (granular access tokens).
+
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.

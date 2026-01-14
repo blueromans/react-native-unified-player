@@ -294,6 +294,9 @@
             [mediaOptions addObject:@"--http-reconnect"];
         }
 
+        // Note: We handle looping manually in the Ended state instead of using VLC's input-repeat
+        // This is more reliable and works even when loop prop changes after media is loaded
+        
         // Add custom media options if provided
         if (self->_mediaOptions && self->_mediaOptions.count > 0) {
             for (NSString *option in self->_mediaOptions) {
@@ -713,7 +716,16 @@
 }
 
 - (void)setLoop:(BOOL)loop {
+    BOOL wasLooping = _loop;
+    RCTLogInfo(@"[UnifiedPlayerViewManager] Setting loop to: %@ (was: %@)", loop ? @"YES" : @"NO", wasLooping ? @"YES" : @"NO");
     _loop = loop;
+    
+    // If loop changed and we have media loaded, we might need to reload
+    // However, VLC's input-repeat needs to be set when media is created
+    // So we'll handle looping manually in the Ended state instead
+    if (_player && _player.media && loop != wasLooping) {
+        RCTLogInfo(@"[UnifiedPlayerViewManager] Loop changed, will handle in Ended state. Current state: %d", (int)_player.state);
+    }
 }
 
 - (void)setIsPaused:(BOOL)isPaused {
@@ -957,14 +969,24 @@
             break;
 
         case VLCMediaPlayerStateEnded:
-             RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateEnded");
-             // Send completion event. Looping/advancement will be handled in JS.
-             [self sendEvent:@"onPlaybackComplete" body:@{}];
-             // Simple loop handling
+             RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateEnded, loop: %@", _loop ? @"YES" : @"NO");
+             // Handle looping before sending completion event
              if (_loop) {
-                  RCTLogInfo(@"[UnifiedPlayerViewManager] Looping video (iOS)");
-                  [_player stop];
-                  [_player play];
+                  RCTLogInfo(@"[UnifiedPlayerViewManager] Looping video (iOS) - restarting from beginning");
+                  // Immediately seek to position 0 and play
+                  // This should work even in Ended state
+                  [self->_player setPosition:0.0f];
+                  
+                  // Play immediately after setting position
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      [self->_player play];
+                      RCTLogInfo(@"[UnifiedPlayerViewManager] Restarted playback for loop, state: %d, isPlaying: %@", 
+                                (int)self->_player.state, self->_player.isPlaying ? @"YES" : @"NO");
+                  });
+             } else {
+                 // Only send completion event if not looping
+                 RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, sending completion event");
+                 [self sendEvent:@"onPlaybackComplete" body:@{}];
              }
              break;
 
@@ -1091,7 +1113,9 @@ RCT_CUSTOM_VIEW_PROPERTY(autoplay, BOOL, UnifiedPlayerUIView)
 // Loop property
 RCT_CUSTOM_VIEW_PROPERTY(loop, BOOL, UnifiedPlayerUIView)
 {
-    view.loop = [RCTConvert BOOL:json];
+    BOOL loopValue = [RCTConvert BOOL:json];
+    RCTLogInfo(@"[UnifiedPlayerViewManager] RCT_CUSTOM_VIEW_PROPERTY loop called with json: %@, converted to: %@", json, loopValue ? @"YES" : @"NO");
+    view.loop = loopValue;
 }
 
 // Media options property

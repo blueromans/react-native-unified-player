@@ -149,10 +149,14 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
                         startProgressUpdates()
                     }
                     Player.STATE_ENDED -> {
-                        Log.d(TAG, "ExoPlayer STATE_ENDED")
-                        // ExoPlayer handles looping via repeatMode
-                        if (!loop) {
+                        Log.d(TAG, "ExoPlayer STATE_ENDED, loop: $loop, repeatMode: ${player?.repeatMode}")
+                        // ExoPlayer handles looping via repeatMode, but we still need to check
+                        // Only send completion event if not looping
+                        if (!loop && player?.repeatMode != Player.REPEAT_MODE_ONE) {
+                            Log.d(TAG, "Sending playback complete event")
                             sendEvent(EVENT_COMPLETE, Arguments.createMap())
+                        } else {
+                            Log.d(TAG, "Looping enabled, not sending completion event")
                         }
                     }
                     Player.STATE_BUFFERING -> {

@@ -1,6 +1,6 @@
 {
   "name": "react-native-unified-player",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Unified Player",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
@@ -38,6 +38,7 @@
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
+    "prepare-publish": "yarn clean && yarn prepare",
     "release": "release-it"
   },
   "keywords": [
@@ -105,13 +106,16 @@
   "release-it": {
     "git": {
       "commitMessage": "chore: release ${version}",
-      "tagName": "v${version}"
+      "tagName": "v${version}",
+      "requireCleanWorkingDir": false
     },
     "npm": {
-      "publish": true
+      "publish": true,
+      "publishPath": "."
     },
     "github": {
-      "release": true
+      "release": true,
+      "autoGenerate": true
     },
     "plugins": {
       "@release-it/conventional-changelog": {
