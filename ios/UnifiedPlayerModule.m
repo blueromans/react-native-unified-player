@@ -4,7 +4,7 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 #import <React/RCTUIManager.h>
-#import <MobileVLCKit/MobileVLCKit.h>
+#import <AVFoundation/AVFoundation.h>
 
 @implementation UnifiedPlayerModule
 
@@ -59,9 +59,9 @@ RCT_EXPORT_METHOD(play:(nonnull NSNumber *)reactTag
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
     [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
-        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
-        if (player && player.media) {
-            [player play];
+        AVPlayer *player = playerView.player;
+        if (player && playerView.playerItem) {
+            [playerView play];
             resolve(@(YES));
         } else {
             reject(@"E_PLAYER_ERROR", @"Player or media not initialized", nil);
@@ -73,9 +73,9 @@ RCT_EXPORT_METHOD(pause:(nonnull NSNumber *)reactTag
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
     [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
-        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
+        AVPlayer *player = playerView.player;
         if (player) {
-            [player pause];
+            [playerView pause];
             resolve(@(YES));
         } else {
             reject(@"E_PLAYER_ERROR", @"Player not initialized", nil);
@@ -88,13 +88,8 @@ RCT_EXPORT_METHOD(seekTo:(nonnull NSNumber *)reactTag
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
     [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
-        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
-        if (player && player.media) {
-            float timeValue = [time floatValue];
-            float duration = player.media.length.intValue / 1000.0f;
-            float position = duration > 0 ? timeValue / duration : 0;
-            position = MAX(0, MIN(1, position));
-            [player setPosition:position];
+        if (playerView.player && playerView.playerItem) {
+            [playerView seekToTime:time];
             resolve(@(YES));
         } else {
             reject(@"E_PLAYER_ERROR", @"Player or media not initialized", nil);
@@ -108,13 +103,8 @@ RCT_EXPORT_METHOD(getCurrentTime:(nonnull NSNumber *)reactTag
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
     [self executeWithPlayerView:reactTag resolver:resolve rejecter:reject block:^(UnifiedPlayerUIView *playerView) {
-        VLCMediaPlayer *player = [playerView valueForKey:@"player"];
-        if (player) {
-            float currentTime = player.time.intValue / 1000.0f;
-            resolve(@(currentTime));
-        } else {
-            reject(@"E_PLAYER_ERROR", @"Player not initialized", nil);
-        }
+        float currentTime = [playerView getCurrentTime];
+        resolve(@(currentTime));
     }];
 }
 

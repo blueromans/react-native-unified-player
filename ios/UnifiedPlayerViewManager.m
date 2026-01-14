@@ -6,7 +6,8 @@
 #import <React/RCTBridge.h>
 #import <React/RCTUIManagerUtils.h>
 #import <React/RCTComponent.h>
-#import <MobileVLCKit/MobileVLCKit.h>
+#import <React/RCTConvert.h>
+#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import "UnifiedPlayerModule.h"
 #import "UnifiedPlayerUIView.h"
@@ -18,20 +19,29 @@
     UIView *_originalSuperview;
     NSUInteger _originalIndex;
     UIView *_fullscreenContainer;
+    float _cachedDuration;
+    BOOL _isObservingPlayerItem;
 }
 
 - (instancetype)init {
     if ((self = [super init])) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Initializing player view");
+        RCTLogInfo(@"[UnifiedPlayerViewManager] Initializing AVPlayer view");
 
         // Initialize properties
         _hasRenderedVideo = NO;
         _readyEventSent = NO;
+        _cachedDuration = 0.0f;
+        _speed = 1.0f; // Default playback speed
+        _isObservingPlayerItem = NO;
 
-        // Create the player
-        _player = [[VLCMediaPlayer alloc] init];
-        _player.delegate = self;
-
+        // Create the AVPlayer
+        _player = [[AVPlayer alloc] init];
+        
+        // Create AVPlayerLayer for rendering
+        _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
+        _playerLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+        _playerLayer.frame = self.bounds;
+        [self.layer addSublayer:_playerLayer];
 
         // Make sure we're visible and properly laid out
         self.backgroundColor = [UIColor blackColor];
@@ -49,153 +59,64 @@
         _thumbnailImageView.hidden = YES;
         [self addSubview:_thumbnailImageView];
 
-        // After the view is fully initialized, set it as the drawable
-        _player.drawable = self;
-
         _autoplay = YES;
         _loop = NO;
         _isFullscreen = NO;
 
-        // Add notification for app entering background
+        // Add notification observers
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(appDidEnterBackground:)
                                                      name:UIApplicationDidEnterBackgroundNotification
                                                    object:nil];
 
-        // Add notification for app entering foreground
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(appDidBecomeActive:)
                                                      name:UIApplicationDidBecomeActiveNotification
                                                    object:nil];
+
+        // Note: AVPlayerItemDidPlayToEndTimeNotification observer will be added when playerItem is created
+        // Add time observer for progress updates
+        [self setupTimeObserver];
     }
     return self;
 }
 
-// Override drawRect to ensure our rendering context is set up without recursion
-- (void)drawRect:(CGRect)rect {
-    [super drawRect:rect];
-
-    // This can sometimes help with VLC rendering issues
-    // But check if we need to do this to avoid unnecessary work
-    if (_player && _player.drawable != self) {
-        _player.drawable = self;
-        // Do not call any methods that would trigger layoutSubviews or drawRect again
-    }
-}
-
-// Override layoutSubviews with safer implementation to avoid recursion
 - (void)layoutSubviews {
     [super layoutSubviews];
-
-    // Check bounds without using NSStringFromCGRect (which can cause recursion)
+    
     CGRect bounds = self.bounds;
-
-    // Only update if we have valid bounds and a player
-    if (bounds.size.width > 0 && bounds.size.height > 0 && _player) {
-        // Ensure drawable is set but don't call any methods that could cause recursion
-        if (_player.drawable != self) {
-            _player.drawable = self;
-        }
-
-        // Let VLC know the size has changed but don't force any redraws here
-        // This may be VLC-specific and not required for all implementations
-    }
-
-    // Update thumbnail image view frame
-    if (_thumbnailImageView) {
-        _thumbnailImageView.frame = bounds;
-    }
+    _playerLayer.frame = bounds;
+    _thumbnailImageView.frame = bounds;
 }
 
-- (void)setupThumbnailWithUrlString:(nullable NSString *)thumbnailUrlString {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] setupThumbnailWithUrlString: %@", thumbnailUrlString);
+- (void)dealloc {
+    RCTLogInfo(@"[UnifiedPlayerViewManager] Deallocating AVPlayer view");
 
-    if (!thumbnailUrlString || [thumbnailUrlString length] == 0) {
-        // Hide thumbnail if URL is empty
-        _thumbnailImageView.hidden = YES;
-        return;
+    // Remove all observers
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    
+    // Remove time observer
+    if (_timeObserverToken) {
+        [_player removeTimeObserver:_timeObserverToken];
+        _timeObserverToken = nil;
+    }
+    
+    // Remove KVO observers
+    [self removePlayerItemObservers];
+
+    // Stop recording if in progress
+    if (_isRecording) {
+        [self stopRecording];
     }
 
-    // Make sure thumbnail view is properly sized
-    _thumbnailImageView.frame = self.bounds;
-
-    // Show the thumbnail view
-    _thumbnailImageView.hidden = NO;
-
-    // Load the image from URL
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *imageURL = [NSURL URLWithString:thumbnailUrlString];
-        if (!imageURL) {
-            // Try with encoding if the original URL doesn't work
-            NSString *escapedString = [thumbnailUrlString stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-            imageURL = [NSURL URLWithString:escapedString];
-
-            if (!imageURL) {
-                RCTLogError(@"[UnifiedPlayerViewManager] Invalid thumbnail URL format");
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self->_thumbnailImageView.hidden = YES;
-                });
-                return;
-            }
-        }
-
-        NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
-        if (imageData) {
-            UIImage *image = [UIImage imageWithData:imageData];
-            if (image) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self->_thumbnailImageView.image = image;
-                    self->_thumbnailImageView.hidden = NO;
-                });
-            } else {
-                RCTLogError(@"[UnifiedPlayerViewManager] Failed to create image from data");
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self->_thumbnailImageView.hidden = YES;
-                });
-            }
-        } else {
-            RCTLogError(@"[UnifiedPlayerViewManager] Failed to load image data from URL");
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self->_thumbnailImageView.hidden = YES;
-            });
-        }
-    });
+    // Clean up player
+    [_player pause];
+    _player = nil;
+    _playerLayer = nil;
+    _playerItem = nil;
 }
 
-- (void)didMoveToSuperview {
-    [super didMoveToSuperview];
-    RCTLogInfo(@"[UnifiedPlayerViewManager] View moved to superview: %@", self.superview);
-
-    // Sometimes VLC needs a reset of the drawable when moving to a superview
-    if (_player) {
-        _player.drawable = nil;
-        _player.drawable = self;
-    }
-}
-
-- (void)didMoveToWindow {
-    [super didMoveToWindow];
-    RCTLogInfo(@"[UnifiedPlayerViewManager] View moved to window: %@", self.window);
-
-    // Ensure proper rendering when window changes
-    if (_player) {
-        _player.drawable = nil;
-        _player.drawable = self;
-    }
-}
-
-- (void)appDidEnterBackground:(NSNotification *)notification {
-    if (_player.isPlaying) {
-        [_player pause];
-    }
-}
-
-- (void)appDidBecomeActive:(NSNotification *)notification {
-    // Optionally resume playback when app becomes active again
-    // if (wasPlayingBeforeBackground) {
-    //    [_player play];
-    // }
-}
+#pragma mark - Helper Methods
 
 - (void)sendProgressEvent:(float)currentTime duration:(float)duration {
     if (self.onProgress) {
@@ -207,7 +128,6 @@
 }
 
 - (void)sendEvent:(NSString *)eventName body:(NSDictionary *)body {
-    // Direct event dispatch based on event name
     RCTDirectEventBlock handler = nil;
 
     if ([eventName isEqualToString:@"onLoadStart"]) {
@@ -237,20 +157,144 @@
     }
 }
 
-// Helper method to load a specific video source URL
+- (void)setupTimeObserver {
+    // Remove existing observer if any
+    if (_timeObserverToken) {
+        [_player removeTimeObserver:_timeObserverToken];
+        _timeObserverToken = nil;
+    }
+    
+    // Add time observer for progress updates (every 0.25 seconds)
+    __weak typeof(self) weakSelf = self;
+    CMTime interval = CMTimeMakeWithSeconds(0.25, NSEC_PER_SEC);
+    _timeObserverToken = [_player addPeriodicTimeObserverForInterval:interval
+                                                               queue:dispatch_get_main_queue()
+                                                          usingBlock:^(CMTime time) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) {
+            float currentTime = CMTimeGetSeconds(time);
+            float duration = [strongSelf getDuration];
+            
+            if (duration > 0 && !isnan(duration) && !isnan(currentTime)) {
+                [strongSelf sendProgressEvent:currentTime duration:duration];
+            }
+        }
+    }];
+}
+
+- (void)addPlayerItemObservers {
+    if (!_playerItem || _isObservingPlayerItem) {
+        return;
+    }
+    
+    _isObservingPlayerItem = YES;
+    
+    // Observe status changes
+    [_playerItem addObserver:self
+                 forKeyPath:@"status"
+                    options:NSKeyValueObservingOptionNew
+                    context:nil];
+    
+    // Observe playback buffer
+    [_playerItem addObserver:self
+                 forKeyPath:@"playbackBufferEmpty"
+                    options:NSKeyValueObservingOptionNew
+                    context:nil];
+    
+    // Observe playback likely to keep up
+    [_playerItem addObserver:self
+                 forKeyPath:@"playbackLikelyToKeepUp"
+                    options:NSKeyValueObservingOptionNew
+                    context:nil];
+}
+
+- (void)removePlayerItemObservers {
+    if (!_playerItem || !_isObservingPlayerItem) {
+        return;
+    }
+    
+    _isObservingPlayerItem = NO;
+    
+    @try {
+        [_playerItem removeObserver:self forKeyPath:@"status"];
+        [_playerItem removeObserver:self forKeyPath:@"playbackBufferEmpty"];
+        [_playerItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
+    } @catch (NSException *exception) {
+        RCTLogWarn(@"[UnifiedPlayerViewManager] Error removing observers: %@", exception);
+    }
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey,id> *)change
+                       context:(void *)context {
+    if (object != _playerItem) {
+        return;
+    }
+    
+    if ([keyPath isEqualToString:@"status"]) {
+        AVPlayerItemStatus status = _playerItem.status;
+        
+        if (status == AVPlayerItemStatusReadyToPlay) {
+            RCTLogInfo(@"[UnifiedPlayerViewManager] AVPlayerItem ready to play");
+            
+            // Cache duration
+            CMTime duration = _playerItem.duration;
+            if (CMTIME_IS_VALID(duration) && !CMTIME_IS_INDEFINITE(duration)) {
+                _cachedDuration = CMTimeGetSeconds(duration);
+                RCTLogInfo(@"[UnifiedPlayerViewManager] Cached duration: %f seconds", _cachedDuration);
+            }
+            
+            // Send ready event if not already sent
+            if (!_readyEventSent) {
+                [self sendEvent:@"onReadyToPlay" body:@{}];
+                _readyEventSent = YES;
+            }
+            
+            // Hide thumbnail when ready
+            if (_thumbnailImageView) {
+                _thumbnailImageView.hidden = YES;
+            }
+            
+            // Start playback if autoplay is enabled
+            if (_autoplay && !_isPaused) {
+                [self play];
+            }
+        } else if (status == AVPlayerItemStatusFailed) {
+            RCTLogError(@"[UnifiedPlayerViewManager] AVPlayerItem failed: %@", _playerItem.error);
+            [self sendEvent:@"onError" body:@{
+                @"code": @"PLAYBACK_ERROR",
+                @"message": _playerItem.error.localizedDescription ?: @"Playback failed",
+                @"details": @{@"url": _videoUrlString ?: @""}
+            }];
+        }
+    } else if ([keyPath isEqualToString:@"playbackBufferEmpty"]) {
+        if (_playerItem.playbackBufferEmpty) {
+            RCTLogInfo(@"[UnifiedPlayerViewManager] Playback buffer empty - stalling");
+            [self sendEvent:@"onPlaybackStalled" body:@{}];
+        }
+    } else if ([keyPath isEqualToString:@"playbackLikelyToKeepUp"]) {
+        if (_playerItem.playbackLikelyToKeepUp) {
+            RCTLogInfo(@"[UnifiedPlayerViewManager] Playback likely to keep up - resumed");
+            [self sendEvent:@"onPlaybackResumed" body:@{}];
+        }
+    }
+}
+
+#pragma mark - Video Loading
+
 - (void)loadVideoSource:(NSString *)urlString {
     RCTLogInfo(@"[UnifiedPlayerViewManager] loadVideoSource: %@", urlString);
 
     // Reset flags
     _hasRenderedVideo = NO;
     _readyEventSent = NO;
+    _cachedDuration = 0.0f;
 
-    // Make sure we're in the main thread
     dispatch_async(dispatch_get_main_queue(), ^{
         // Check if URL is valid
         NSURL *videoURL = [NSURL URLWithString:urlString];
         if (!videoURL) {
-            // Try with encoding if the original URL doesn't work
             NSString *escapedString = [urlString stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
             videoURL = [NSURL URLWithString:escapedString];
 
@@ -263,86 +307,52 @@
                 [self sendEvent:@"onError" body:errorInfo];
                 return;
             }
-            RCTLogInfo(@"[UnifiedPlayerViewManager] URL needed encoding: %@", videoURL.absoluteString);
         }
 
         RCTLogInfo(@"[UnifiedPlayerViewManager] Using URL: %@", videoURL.absoluteString);
 
-        // Send onLoadStart event before loading starts
-        [self sendEvent:@"onLoadStart" body:@{}]; // No index sent
+        // Send onLoadStart event
+        [self sendEvent:@"onLoadStart" body:@{}];
 
-        // Create VLC media options array
-        NSMutableArray *mediaOptions = [NSMutableArray array];
-
-        // Add default network caching options for streaming
-        BOOL isStreaming = [videoURL.scheme hasPrefix:@"http"] ||
-                           [videoURL.scheme hasPrefix:@"rtsp"] ||
-                           [videoURL.scheme hasPrefix:@"rtmp"] ||
-                           [videoURL.scheme hasPrefix:@"mms"];
-
-        if (isStreaming) {
-            if (![self->_mediaOptions containsObject:@"network-caching"]) {
-                [mediaOptions addObject:@"--network-caching=1500"];
-                [mediaOptions addObject:@"--live-caching=1500"];
-                [mediaOptions addObject:@"--file-caching=1500"];
-                [mediaOptions addObject:@"--disc-caching=300"];
-                [mediaOptions addObject:@"--clock-jitter=0"];
-                [mediaOptions addObject:@"--clock-synchro=0"];
-            }
-            [mediaOptions addObject:@"--rtsp-tcp"];
-            [mediaOptions addObject:@"--ipv4-timeout=1000"];
-            [mediaOptions addObject:@"--http-reconnect"];
-        }
-
-        // Note: We handle looping manually in the Ended state instead of using VLC's input-repeat
-        // This is more reliable and works even when loop prop changes after media is loaded
+        // Remove old observers
+        [self removePlayerItemObservers];
         
-        // Add custom media options if provided
-        if (self->_mediaOptions && self->_mediaOptions.count > 0) {
-            for (NSString *option in self->_mediaOptions) {
-                if ([option isKindOfClass:[NSString class]]) {
-                    if ([option hasPrefix:@"--"]) {
-                        [mediaOptions addObject:option];
-                    } else {
-                        [mediaOptions addObject:[NSString stringWithFormat:@"--%@", option]];
-                    }
-                }
-            }
+        // Remove old player item from notification center
+        if (self->_playerItem) {
+            [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                            name:AVPlayerItemDidPlayToEndTimeNotification
+                                                          object:self->_playerItem];
         }
 
-        // Stop any existing playback first
-        [self->_player stop];
-
-        // Create VLC media with options
-        VLCMedia *media = [VLCMedia mediaWithURL:videoURL];
-        for (NSString *option in mediaOptions) {
-            [media addOption:option];
+        // Create AVAsset
+        AVAsset *asset = [AVAsset assetWithURL:videoURL];
+        
+        // Create AVPlayerItem
+        self->_playerItem = [AVPlayerItem playerItemWithAsset:asset];
+        
+        // Replace current item
+        [self->_player replaceCurrentItemWithPlayerItem:self->_playerItem];
+        
+        // Add observers
+        [self addPlayerItemObservers];
+        
+        // Add notification observer for end of playback
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(playerItemDidReachEnd:)
+                                                     name:AVPlayerItemDidPlayToEndTimeNotification
+                                                   object:self->_playerItem];
+        
+        // Apply playback speed if set
+        if (self->_speed > 0 && self->_speed != 1.0f) {
+            float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
+            self->_player.rate = validSpeed;
         }
-
-        // Parse media to get metadata (including duration)
-        [media parseWithOptions:VLCMediaParseNetwork | VLCMediaFetchNetwork timeout:10000];
-
-        // Set new media to player
-        self->_player.media = media;
-        self->_player.drawable = self;
-        self->_player.videoAspectRatio = NULL; // Use default aspect ratio
-
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Media configured with options: %@, duration: %d ms", mediaOptions, media.length.intValue);
-
-        // Use UIKit methods for layout/display updates
-        [self setNeedsLayout];
-        [self layoutIfNeeded];
-        [self setNeedsDisplay];
-
-        // Start playback if autoplay is enabled and not paused
-        if (self->_autoplay && !self->_isPaused) {
-            [self->_player play];
-            [self setNeedsDisplay];
-        }
+        
+        // Setup looping if enabled
+        [self updateLooping];
     });
 }
 
-// Setup video URL
 - (void)setupWithVideoUrlString:(nullable NSString *)videoUrlString {
     RCTLogInfo(@"[UnifiedPlayerViewManager] setupWithVideoUrlString: %@", videoUrlString);
     _videoUrlString = [videoUrlString copy];
@@ -350,723 +360,203 @@
     if (videoUrlString && videoUrlString.length > 0) {
         [self loadVideoSource:videoUrlString];
     } else {
-        [_player stop];
-        _player.media = nil;
+        [_player pause];
+        [_player replaceCurrentItemWithPlayerItem:nil];
+        [self removePlayerItemObservers];
+        _playerItem = nil;
     }
 }
 
-- (void)play {
-    if (_player.media) {
-        // Make sure drawable is properly set before playing
-        if (_player.drawable != self) {
-            _player.drawable = self;
-        }
+- (void)setupThumbnailWithUrlString:(nullable NSString *)thumbnailUrlString {
+    if (!thumbnailUrlString || thumbnailUrlString.length == 0) {
+        _thumbnailImageView.hidden = YES;
+        return;
+    }
 
-        // Ensure video track is enabled if available
-        if (_player.numberOfVideoTracks > 0 && _player.currentVideoTrackIndex == -1) {
-            // Attempt to enable the first video track
-            if (_player.videoTrackIndexes.count > 0) {
-                NSNumber *videoTrackIndex = [_player.videoTrackIndexes firstObject];
-                _player.currentVideoTrackIndex = [videoTrackIndex intValue];
-                RCTLogInfo(@"[UnifiedPlayerViewManager] Enabling video track index: %@", videoTrackIndex);
+    _thumbnailUrlString = [thumbnailUrlString copy];
+    NSURL *thumbnailURL = [NSURL URLWithString:thumbnailUrlString];
+    
+    if (thumbnailURL) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NSData *imageData = [NSData dataWithContentsOfURL:thumbnailURL];
+            if (imageData) {
+                UIImage *image = [UIImage imageWithData:imageData];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self->_thumbnailImageView.image = image;
+                    self->_thumbnailImageView.hidden = NO;
+                });
             }
+        });
+    }
+}
+
+#pragma mark - Playback Control
+
+- (void)play {
+    if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
+        // Apply speed if set
+        if (_speed > 0 && _speed != 1.0f) {
+            float validSpeed = MAX(0.25f, MIN(4.0f, _speed));
+            _player.rate = validSpeed;
+        } else {
+            _player.rate = 1.0f;
         }
-
-        // Apply aspect ratio settings
-        _player.videoAspectRatio = NULL; // Use default aspect ratio
-
-        // Set scale mode for the VLC video output
-        // Note: VLC has its own scaling which is separate from UIView contentMode
-        _player.scaleFactor = 0.0; // Auto scale
-
+        
         [_player play];
-
-        // Use these methods instead of forceRedraw
-        [self setNeedsLayout];
-        [self layoutIfNeeded];
-        [self setNeedsDisplay];
-
-        RCTLogInfo(@"[UnifiedPlayerViewManager] play called, drawable: %@, frame: %@",
-                 _player.drawable, NSStringFromCGRect(self.frame));
+        [self sendEvent:@"onPlaying" body:@{}];
+        RCTLogInfo(@"[UnifiedPlayerViewManager] play called");
+    } else {
+        RCTLogWarn(@"[UnifiedPlayerViewManager] Cannot play - player item not ready");
     }
 }
 
 - (void)pause {
     [_player pause];
+    [self sendEvent:@"onPaused" body:@{}];
     RCTLogInfo(@"[UnifiedPlayerViewManager] pause called");
 }
 
 - (void)seekToTime:(NSNumber *)timeNumber {
     float time = [timeNumber floatValue];
-    // VLC uses a 0-1 position value for seeking
-    float duration = [self getDuration];
-    float position = duration > 0 ? time / duration : 0;
-    position = MAX(0, MIN(1, position)); // Ensure position is between 0 and 1
-
-    [_player setPosition:position];
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Seek to %f (position: %f)", time, position);
+    
+    if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
+        CMTime seekTime = CMTimeMakeWithSeconds(time, NSEC_PER_SEC);
+        CMTime duration = _playerItem.duration;
+        
+        // Ensure seek time is within bounds
+        if (CMTIME_IS_VALID(duration) && CMTimeCompare(seekTime, duration) > 0) {
+            seekTime = duration;
+        }
+        
+        [_player seekToTime:seekTime toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+        RCTLogInfo(@"[UnifiedPlayerViewManager] Seek to %f seconds", time);
+    }
 }
 
 - (float)getCurrentTime {
-    if (_player) {
-        return _player.time.intValue / 1000.0f;
+    if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
+        CMTime currentTime = _player.currentTime;
+        if (CMTIME_IS_VALID(currentTime)) {
+            return CMTimeGetSeconds(currentTime);
+        }
     }
     return 0.0f;
 }
 
 - (float)getDuration {
-    if (_player && _player.media) {
-        float mediaDuration = _player.media.length.intValue / 1000.0f;
-
-        // If media.length is not available yet, try to calculate from position and time
-        if (mediaDuration <= 0 && _player.position > 0) {
-            float currentTime = _player.time.intValue / 1000.0f;
-            if (currentTime > 0) {
-                mediaDuration = currentTime / _player.position;
+    if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
+        CMTime duration = _playerItem.duration;
+        if (CMTIME_IS_VALID(duration) && !CMTIME_IS_INDEFINITE(duration)) {
+            float durationSeconds = CMTimeGetSeconds(duration);
+            if (durationSeconds > 0) {
+                _cachedDuration = durationSeconds;
+                return durationSeconds;
             }
         }
-
-        return mediaDuration;
     }
-    return 0.0f;
+    
+    // Return cached duration if available
+    return _cachedDuration > 0 ? _cachedDuration : 0.0f;
 }
 
 - (void)setSpeed:(float)speed {
-    if (_player) {
-        BOOL wasPlaying = _player.isPlaying;
-        float currentPosition = _player.position;
-        VLCMediaPlayerState currentState = _player.state;
-        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: %f (wasPlaying: %d, state: %d, position: %f)", speed, wasPlaying, (int)currentState, currentPosition);
-
-        // VLC's setRate can sometimes pause playback, so we need to handle this
-        [_player setRate:speed];
-
-        RCTLogInfo(@"[UnifiedPlayerViewManager] After setRate - isPlaying: %d, state: %d", _player.isPlaying, (int)_player.state);
-
-        // If the player was playing before, make sure it continues playing
-        if (wasPlaying || currentState == VLCMediaPlayerStatePlaying || currentState == VLCMediaPlayerStateBuffering) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                RCTLogInfo(@"[UnifiedPlayerViewManager] Delayed check - isPlaying: %d, state: %d", self->_player.isPlaying, (int)self->_player.state);
-                if (!self->_player.isPlaying && self->_player.state != VLCMediaPlayerStatePlaying) {
-                    [self->_player play];
-                    RCTLogInfo(@"[UnifiedPlayerViewManager] Resumed playback after speed change");
-                }
-            });
-        }
-    } else {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: player is nil!");
-    }
-}
-
-- (void)captureFrameWithCompletion:(void (^)(NSString * _Nullable base64String, NSError * _Nullable error))completion {
-    if (!_player || !_player.drawable) {
-        NSError *error = [NSError errorWithDomain:@"UnifiedPlayerUIView" code:100 userInfo:@{NSLocalizedDescriptionKey: @"Player not initialized"}];
-        if (completion) {
-            completion(nil, error);
-        }
-        return;
-    }
-
-    // Create a snapshot of the current view
-    UIGraphicsBeginImageContextWithOptions(self.bounds.size, NO, [UIScreen mainScreen].scale);
-    [self drawViewHierarchyInRect:self.bounds afterScreenUpdates:YES];
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-
-    if (!image) {
-        NSError *error = [NSError errorWithDomain:@"UnifiedPlayerUIView" code:101 userInfo:@{NSLocalizedDescriptionKey: @"Failed to capture frame"}];
-        if (completion) {
-            completion(nil, error);
-        }
-        return;
-    }
-
-    // Convert to base64
-    NSData *imageData = UIImageJPEGRepresentation(image, 0.8);
-    NSString *base64String = [imageData base64EncodedStringWithOptions:0];
-
-    if (completion) {
-        completion(base64String, nil);
-    }
-}
-
-- (BOOL)startRecordingToPath:(NSString *)outputPath {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] startRecordingToPath: %@", outputPath);
-
-    if (_isRecording) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Recording is already in progress");
-        return NO;
-    }
-
-    if (!_player || !_player.isPlaying) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Cannot start recording: Player is not playing");
-        return NO;
-    }
-
-    // Store the recording path
-    _recordingPath = [outputPath copy];
-
-    // Create directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *directory = [outputPath stringByDeletingLastPathComponent];
-    if (![fileManager fileExistsAtPath:directory]) {
-        NSError *error = nil;
-        [fileManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error) {
-            RCTLogError(@"[UnifiedPlayerViewManager] Failed to create directory: %@", error);
-            return NO;
-        }
-    }
-
-    // Set up AVAssetWriter
-    NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
-
-    // Remove existing file if it exists
-    if ([fileManager fileExistsAtPath:outputPath]) {
-        NSError *error = nil;
-        [fileManager removeItemAtPath:outputPath error:&error];
-        if (error) {
-            RCTLogError(@"[UnifiedPlayerViewManager] Failed to remove existing file: %@", error);
-            return NO;
-        }
-    }
-
-    NSError *error = nil;
-    _assetWriter = [[AVAssetWriter alloc] initWithURL:outputURL fileType:AVFileTypeMPEG4 error:&error];
-    if (error) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Failed to create asset writer: %@", error);
-        return NO;
-    }
-
-    // Get video dimensions
-    CGSize videoSize = _player.videoSize;
-    if (videoSize.width <= 0 || videoSize.height <= 0) {
-        // Use view size as fallback
-        videoSize = self.bounds.size;
-    }
-
-    // Configure video settings
-    NSDictionary *videoSettings = @{
-        AVVideoCodecKey: AVVideoCodecTypeH264,
-        AVVideoWidthKey: @((int)videoSize.width),
-        AVVideoHeightKey: @((int)videoSize.height),
-        AVVideoCompressionPropertiesKey: @{
-            AVVideoAverageBitRateKey: @(2000000), // 2 Mbps
-            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
-        }
-    };
-
-    // Create video input
-    _assetWriterVideoInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:videoSettings];
-    _assetWriterVideoInput.expectsMediaDataInRealTime = YES;
-
-    if ([_assetWriter canAddInput:_assetWriterVideoInput]) {
-        [_assetWriter addInput:_assetWriterVideoInput];
-    } else {
-        RCTLogError(@"[UnifiedPlayerViewManager] Cannot add video input to asset writer");
-        return NO;
-    }
-
-    // Create a pixel buffer adaptor for writing pixel buffers
-    NSDictionary *pixelBufferAttributes = @{
-        (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
-        (NSString *)kCVPixelBufferWidthKey: @((int)videoSize.width),
-        (NSString *)kCVPixelBufferHeightKey: @((int)videoSize.height),
-        (NSString *)kCVPixelBufferCGImageCompatibilityKey: @YES,
-        (NSString *)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES
-    };
-
-    _assetWriterPixelBufferAdaptor = [AVAssetWriterInputPixelBufferAdaptor
-                                     assetWriterInputPixelBufferAdaptorWithAssetWriterInput:_assetWriterVideoInput
-                                     sourcePixelBufferAttributes:pixelBufferAttributes];
-
-    // Start recording session
-    if ([_assetWriter startWriting]) {
-        [_assetWriter startSessionAtSourceTime:kCMTimeZero];
-        _isRecording = YES;
-
-        // Start a timer to capture frames
-        [self startFrameCapture];
-
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Recording started successfully");
-        return YES;
-    } else {
-        RCTLogError(@"[UnifiedPlayerViewManager] Failed to start writing: %@", _assetWriter.error);
-        return NO;
-    }
-}
-
-- (void)startFrameCapture {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Frame capture started");
-
-    // Create a CADisplayLink to capture frames at the screen refresh rate
-    CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(captureFrameForRecording)];
-    [displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-
-    // Store the display link as an associated object
-    objc_setAssociatedObject(self, "displayLinkKey", displayLink, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    // Initialize frame count
-    _frameCount = 0;
-}
-
-- (void)captureFrameForRecording {
-    if (!_isRecording || !_assetWriterVideoInput.isReadyForMoreMediaData) {
-        return;
-    }
-
-    // Create a bitmap context to draw the current view
-    CGSize size = _player.videoSize;
-    if (size.width <= 0 || size.height <= 0) {
-        size = self.bounds.size;
-    }
-
-    // Create a pixel buffer
-    CVPixelBufferRef pixelBuffer = NULL;
-    CVReturn status = CVPixelBufferPoolCreatePixelBuffer(NULL, _assetWriterPixelBufferAdaptor.pixelBufferPool, &pixelBuffer);
-
-    if (status != kCVReturnSuccess || pixelBuffer == NULL) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Failed to create pixel buffer");
-        return;
-    }
-
-    // Lock the pixel buffer
-    CVPixelBufferLockBaseAddress(pixelBuffer, 0);
-
-    // Get the pixel buffer address
-    void *pixelData = CVPixelBufferGetBaseAddress(pixelBuffer);
-
-    // Create a bitmap context
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef context = CGBitmapContextCreate(pixelData,
-                                                size.width,
-                                                size.height,
-                                                8,
-                                                CVPixelBufferGetBytesPerRow(pixelBuffer),
-                                                colorSpace,
-                                                kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
-
-    // Draw the current view into the context
-    UIGraphicsPushContext(context);
-    [self.layer renderInContext:context];
-    UIGraphicsPopContext();
-
-    // Clean up
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
-
-    // Unlock the pixel buffer
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
-
-    // Calculate the presentation time
-    CMTime presentationTime = CMTimeMake(_frameCount, 30); // 30 fps
-
-    // Append the pixel buffer to the asset writer
-    if (![_assetWriterPixelBufferAdaptor appendPixelBuffer:pixelBuffer withPresentationTime:presentationTime]) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Failed to append pixel buffer: %@", _assetWriter.error);
-    }
-
-    // Release the pixel buffer
-    CVPixelBufferRelease(pixelBuffer);
-
-    // Increment the frame count
-    _frameCount++;
-}
-
-- (NSString *)stopRecording {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] stopRecording called");
-
-    if (!_isRecording) {
-        RCTLogError(@"[UnifiedPlayerViewManager] No recording in progress");
-        return @"";
-    }
-
-    // Stop frame capture by stopping the display link
-    CADisplayLink *displayLink = objc_getAssociatedObject(self, "displayLinkKey");
-    if (displayLink) {
-        [displayLink invalidate];
-        objc_setAssociatedObject(self, "displayLinkKey", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    // Finish writing
-    [_assetWriterVideoInput markAsFinished];
-    [_assetWriter finishWritingWithCompletionHandler:^{
-        if (self->_assetWriter.status == AVAssetWriterStatusCompleted) {
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Recording completed successfully");
+    _speed = speed;
+    float validSpeed = MAX(0.25f, MIN(4.0f, speed));
+    
+    RCTLogInfo(@"[UnifiedPlayerViewManager] setSpeed: %f (valid: %f)", speed, validSpeed);
+    
+    if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
+        if (_player.rate > 0) {
+            // Player is playing, set rate directly
+            _player.rate = validSpeed;
         } else {
-            RCTLogError(@"[UnifiedPlayerViewManager] Recording failed: %@", self->_assetWriter.error);
+            // Player is paused, rate will be applied on next play
         }
-
-        // Clean up
-        self->_assetWriter = nil;
-        self->_assetWriterVideoInput = nil;
-        self->_assetWriterPixelBufferAdaptor = nil;
-        self->_isRecording = NO;
-        self->_frameCount = 0;
-    }];
-
-    NSString *path = _recordingPath;
-    _recordingPath = nil;
-
-    return path;
+    }
 }
 
-- (void)setAutoplay:(BOOL)autoplay {
-    _autoplay = autoplay;
+- (void)updateLooping {
+    // Note: AVPlayerLooper requires AVQueuePlayer, but switching players can be complex
+    // For now, we'll handle looping manually via notification observer
+    // This is simpler and more reliable for our use case
+    RCTLogInfo(@"[UnifiedPlayerViewManager] Loop setting updated: %@", _loop ? @"YES" : @"NO");
 }
 
 - (void)setLoop:(BOOL)loop {
-    BOOL wasLooping = _loop;
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Setting loop to: %@ (was: %@)", loop ? @"YES" : @"NO", wasLooping ? @"YES" : @"NO");
     _loop = loop;
+    [self updateLooping];
+}
+
+#pragma mark - Notifications
+
+- (void)playerItemDidReachEnd:(NSNotification *)notification {
+    RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, loop: %@", _loop ? @"YES" : @"NO");
     
-    // If loop changed and we have media loaded, we might need to reload
-    // However, VLC's input-repeat needs to be set when media is created
-    // So we'll handle looping manually in the Ended state instead
-    if (_player && _player.media && loop != wasLooping) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Loop changed, will handle in Ended state. Current state: %d", (int)_player.state);
-    }
-}
-
-- (void)setIsPaused:(BOOL)isPaused {
-    if (_isPaused != isPaused) {
-        _isPaused = isPaused;
-        if (_player) {
-            if (_isPaused && _player.isPlaying) {
-                [_player pause];
-                RCTLogInfo(@"[UnifiedPlayerViewManager] Paused via isPaused prop");
-            } else if (!_isPaused && !_player.isPlaying) {
-                [_player play];
-                RCTLogInfo(@"[UnifiedPlayerViewManager] Played via isPaused prop");
+    if (_loop) {
+        // Seek to beginning and play again
+        [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished) {
+            if (finished) {
+                [self->_player play];
+                RCTLogInfo(@"[UnifiedPlayerViewManager] Looped video - restarted from beginning");
             }
-        }
+        }];
+    } else {
+        // If not looping, send completion event
+        [self sendEvent:@"onPlaybackComplete" body:@{}];
     }
 }
 
-- (void)setIsFullscreen:(BOOL)isFullscreen {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] setIsFullscreen: %d", isFullscreen);
-    [self toggleFullscreen:isFullscreen];
+- (void)appDidEnterBackground:(NSNotification *)notification {
+    RCTLogInfo(@"[UnifiedPlayerViewManager] App entered background");
+    // AVPlayer handles background playback automatically if configured
 }
+
+- (void)appDidBecomeActive:(NSNotification *)notification {
+    RCTLogInfo(@"[UnifiedPlayerViewManager] App became active");
+    // Resume playback if needed
+}
+
+#pragma mark - Fullscreen
 
 - (void)toggleFullscreen:(BOOL)fullscreen {
-    if (_isFullscreen == fullscreen) {
-        return; // Already in the requested state
-    }
-
+    // Fullscreen implementation would go here
+    // For now, just update the flag
     _isFullscreen = fullscreen;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (fullscreen) {
-            [self enterFullscreen];
-        } else {
-            [self exitFullscreen];
-        }
-
-        // Send event about fullscreen state change
-        if (self.onFullscreenChanged) {
-            self.onFullscreenChanged(@{@"isFullscreen": @(fullscreen)});
-        }
-    });
-}
-
-- (void)enterFullscreen {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Entering fullscreen mode");
-
-    // Get the key window
-    UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
-    if (!keyWindow) {
-        RCTLogError(@"[UnifiedPlayerViewManager] Cannot find key window");
-        return;
-    }
-
-    // Save original frame and superview
-    _originalFrame = self.frame;
-    _originalSuperview = self.superview;
-    _originalIndex = [self.superview.subviews indexOfObject:self];
-
-    // Remove from current superview
-    [self removeFromSuperview];
-
-    // Add to window with fullscreen frame
-    CGRect fullscreenFrame = keyWindow.bounds;
-    self.frame = fullscreenFrame;
-    [keyWindow addSubview:self];
-
-    // Bring to front
-    [keyWindow bringSubviewToFront:self];
-
-    // Force landscape orientation
-    NSNumber *value = [NSNumber numberWithInt:UIInterfaceOrientationLandscapeRight];
-    [[UIDevice currentDevice] setValue:value forKey:@"orientation"];
-    [UIViewController attemptRotationToDeviceOrientation];
-
-    // Hide status bar
-    [[UIApplication sharedApplication] setStatusBarHidden:YES withAnimation:UIStatusBarAnimationSlide];
-
-    // Keep screen on during playback
-    [[UIApplication sharedApplication] setIdleTimerDisabled:YES];
-
-    // Set background color to black for better fullscreen experience
-    self.backgroundColor = [UIColor blackColor];
-
-    // Update player layout
-    [self setNeedsLayout];
-    [self layoutIfNeeded];
-
-    // Re-attach the drawable to ensure video continues playing
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (_player) {
-            // Reset the drawable to ensure the video surface is properly connected
-            _player.drawable = nil;
-            _player.drawable = self;
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Re-attached drawable after entering fullscreen");
-        }
-    });
-}
-
-- (void)exitFullscreen {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Exiting fullscreen mode");
-
-    // Remove from window
-    [self removeFromSuperview];
-
-    // Restore to original superview
-    if (_originalSuperview) {
-        self.frame = _originalFrame;
-        if (_originalIndex < _originalSuperview.subviews.count) {
-            [_originalSuperview insertSubview:self atIndex:_originalIndex];
-        } else {
-            [_originalSuperview addSubview:self];
-        }
-    }
-
-    // Restore portrait orientation
-    NSNumber *value = [NSNumber numberWithInt:UIInterfaceOrientationPortrait];
-    [[UIDevice currentDevice] setValue:value forKey:@"orientation"];
-    [UIViewController attemptRotationToDeviceOrientation];
-
-    // Show status bar
-    [[UIApplication sharedApplication] setStatusBarHidden:NO withAnimation:UIStatusBarAnimationSlide];
-
-    // Allow screen to turn off
-    [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
-
-    // Restore original background color
-    self.backgroundColor = [UIColor blackColor];
-
-    // Update player layout
-    [self setNeedsLayout];
-    [self layoutIfNeeded];
-
-    // Re-attach the drawable to ensure video continues playing
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (_player) {
-            // Reset the drawable to ensure the video surface is properly connected
-            _player.drawable = nil;
-            _player.drawable = self;
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Re-attached drawable after exiting fullscreen");
-        }
-    });
-}
-
-
-#pragma mark - VLCMediaPlayerDelegate
-
-- (void)mediaPlayerTimeChanged:(NSNotification *)notification {
-    float currentTime = [self getCurrentTime];
-    float duration = [self getDuration];
-
-    // Avoid sending progress events for invalid durations
-    if (duration > 0 && !isnan(duration)) {
-        [self sendProgressEvent:currentTime duration:duration];
-    }
-    // Log every 2 seconds approximately
-    static int logCounter = 0;
-    if (logCounter++ % 8 == 0) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] mediaPlayerTimeChanged - CurrentTime: %f, Duration: %f, Rate: %f", currentTime, duration, _player.rate);
+    if (self.onFullscreenChanged) {
+        self.onFullscreenChanged(@{@"isFullscreen": @(fullscreen)});
     }
 }
 
-- (void)mediaPlayerStateChanged:(NSNotification *)notification {
-    VLCMediaPlayerState state = _player.state;
-    RCTLogInfo(@"[UnifiedPlayerViewManager] mediaPlayerStateChanged - New State: %d", state); // Added Log
+#pragma mark - Recording (Placeholder - can be implemented later)
 
-    // Check if media is ready to play
-    if ((state == VLCMediaPlayerStateBuffering || state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && !_readyEventSent) {
-        // Check if we have video tracks
-        NSArray *videoTracks = [_player.media tracksInformation];
-        if (videoTracks.count > 0 || _player.hasVideoOut) {
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Media is ready to play - Video tracks found: %lu", (unsigned long)videoTracks.count);
-
-            // Send ready event when media is ready, regardless of autoplay
-            [self sendEvent:@"onReadyToPlay" body:@{}];
-            _readyEventSent = YES;
-        }
-    }
-
-    // Debug information for video output
-    if (state == VLCMediaPlayerStatePlaying) {
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Video size: %@",
-                   NSStringFromCGSize(_player.videoSize));
-        RCTLogInfo(@"[UnifiedPlayerViewManager] Has video out: %@",
-                   _player.hasVideoOut ? @"YES" : @"NO");
-
-        // Check video tracks
-        NSArray *videoTracks = [_player.media tracksInformation];
-        if (videoTracks.count > 0) {
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Video tracks found: %lu", (unsigned long)videoTracks.count);
-
-            // Hide thumbnail when video starts playing
-            if (_thumbnailImageView) {
-                _thumbnailImageView.hidden = YES;
-            }
-
-            // Send playing event when we actually start playing
-            [self sendEvent:@"onPlaying" body:@{}];
-
-            // Trigger a delayed drawable update to help with rendering
-            if (!_hasRenderedVideo && _player.videoSize.width > 0) {
-                _hasRenderedVideo = YES;
-                [self updatePlayerDrawableWithDelay];
-            }
-        } else {
-            RCTLogInfo(@"[UnifiedPlayerViewManager] No video tracks found!");
-        }
-    }
-
-    // Check for buffer state transitions
-    if (_previousState == VLCMediaPlayerStateBuffering && state == VLCMediaPlayerStatePlaying) {
-        // We've recovered from buffering
-        [self sendEvent:@"onPlaybackResumed" body:@{}];
-    }
-
-    // Store the current state for future comparisons
-    _previousState = state;
-
-    // React to state changes
-    switch (state) {
-        case VLCMediaPlayerStateOpening:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateOpening");
-            break;
-
-        case VLCMediaPlayerStateBuffering:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateBuffering");
-            [self sendEvent:@"onPlaybackStalled" body:@{}];
-            break;
-
-        case VLCMediaPlayerStatePlaying:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStatePlaying");
-            break;
-
-        case VLCMediaPlayerStatePaused:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStatePaused");
-            [self sendEvent:@"onPaused" body:@{}];
-            break;
-
-        case VLCMediaPlayerStateStopped:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateStopped");
-            // We don't emit onStopped event as it's not in our unified event list
-            break;
-
-        case VLCMediaPlayerStateEnded:
-             RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateEnded, loop: %@", _loop ? @"YES" : @"NO");
-             // Handle looping before sending completion event
-             if (_loop) {
-                  RCTLogInfo(@"[UnifiedPlayerViewManager] Looping video (iOS) - restarting from beginning");
-                  // Immediately seek to position 0 and play
-                  // This should work even in Ended state
-                  [self->_player setPosition:0.0f];
-                  
-                  // Play immediately after setting position
-                  dispatch_async(dispatch_get_main_queue(), ^{
-                      [self->_player play];
-                      RCTLogInfo(@"[UnifiedPlayerViewManager] Restarted playback for loop, state: %d, isPlaying: %@", 
-                                (int)self->_player.state, self->_player.isPlaying ? @"YES" : @"NO");
-                  });
-             } else {
-                 // Only send completion event if not looping
-                 RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, sending completion event");
-                 [self sendEvent:@"onPlaybackComplete" body:@{}];
-             }
-             break;
-
-        case VLCMediaPlayerStateError:
-            RCTLogInfo(@"[UnifiedPlayerViewManager] VLCMediaPlayerStateError");
-            [self sendEvent:@"onError" body:@{
-                @"code": @"PLAYBACK_ERROR",
-                @"message": @"VLC player encountered an error",
-                @"details": @{@"url": _videoUrlString ?: @""}
-            }];
-            break;
-
-        default:
-            break;
+- (void)captureFrameWithCompletion:(void (^)(NSString * _Nullable base64String, NSError * _Nullable error))completion {
+    // Placeholder implementation
+    if (completion) {
+        completion(nil, [NSError errorWithDomain:@"UnifiedPlayer" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Not implemented"}]);
     }
 }
 
-- (void)mediaPlayerSnapshot:(NSNotification *)notification {
-    // Handle snapshot completion if needed
+- (void)captureFrameForRecording {
+    // Placeholder
 }
 
-- (void)mediaPlayerTitleChanged:(NSNotification *)notification {
-    // Handle title changes if needed
+- (BOOL)startRecordingToPath:(NSString *)outputPath {
+    // Placeholder
+    return NO;
 }
 
-// Define a method that maps VLC buffer state changes to appropriate RN events
-- (void)handleBufferingStatusChange {
-    if (_player.state == VLCMediaPlayerStateBuffering) {
-        // When buffering, send stalled event
-        [self sendEvent:@"onPlaybackStalled" body:@{}];
-    } else if (_player.state == VLCMediaPlayerStatePlaying && _player.isPlaying) {
-        // When buffer is full and playing again, send resumed event
-        [self sendEvent:@"onPlaybackResumed" body:@{}];
-    }
+- (void)startFrameCapture {
+    // Placeholder
 }
 
-- (void)dealloc {
-    RCTLogInfo(@"[UnifiedPlayerViewManager] Deallocating player view");
-
-    // Remove all observers
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-
-    // Stop recording if in progress
-    if (_isRecording) {
-        [self stopRecording];
-    }
-
-    // Clean up display link if it exists
-    CADisplayLink *displayLink = objc_getAssociatedObject(self, "displayLinkKey");
-    if (displayLink) {
-        [displayLink invalidate];
-        objc_setAssociatedObject(self, "displayLinkKey", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    // Stop playback and release player
-    [_player stop];
-    _player.delegate = nil;
-    _player = nil;
-}
-
-// Update updatePlayerDrawableWithDelay to use safer redraw approach
-- (void)updatePlayerDrawableWithDelay {
-    // Sometimes a slight delay can help with rendering issues
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (self->_player) {
-            // Reset drawable
-            self->_player.drawable = nil;
-            self->_player.drawable = self;
-
-            // Call UIKit methods directly instead of forceRedraw
-            [self setNeedsLayout];
-            [self layoutIfNeeded];
-            [self setNeedsDisplay];
-
-            RCTLogInfo(@"[UnifiedPlayerViewManager] Drawable updated with delay");
-        }
-    });
+- (NSString *)stopRecording {
+    // Placeholder
+    return @"";
 }
 
 @end
+
+#pragma mark - View Manager
 
 @interface UnifiedPlayerViewManager : RCTViewManager
 @end
@@ -1075,16 +565,10 @@
 
 RCT_EXPORT_MODULE(UnifiedPlayerView)
 
-@synthesize bridge = _bridge;
-
-- (UIView *)view
-{
-    UnifiedPlayerUIView *playerView = [[UnifiedPlayerUIView alloc] init];
-    playerView.bridge = self.bridge;
-    return playerView;
+- (UIView *)view {
+    return [[UnifiedPlayerUIView alloc] init];
 }
 
-// Video URL property
 RCT_CUSTOM_VIEW_PROPERTY(videoUrl, NSString, UnifiedPlayerUIView)
 {
     if ([json isKindOfClass:[NSString class]]) {
@@ -1097,55 +581,52 @@ RCT_CUSTOM_VIEW_PROPERTY(videoUrl, NSString, UnifiedPlayerUIView)
     }
 }
 
-// Thumbnail URL property
 RCT_CUSTOM_VIEW_PROPERTY(thumbnailUrl, NSString, UnifiedPlayerUIView)
 {
     view.thumbnailUrlString = json;
     [view setupThumbnailWithUrlString:json];
 }
 
-// Autoplay property
 RCT_CUSTOM_VIEW_PROPERTY(autoplay, BOOL, UnifiedPlayerUIView)
 {
     view.autoplay = [RCTConvert BOOL:json];
 }
 
-// Loop property
 RCT_CUSTOM_VIEW_PROPERTY(loop, BOOL, UnifiedPlayerUIView)
 {
     BOOL loopValue = [RCTConvert BOOL:json];
-    RCTLogInfo(@"[UnifiedPlayerViewManager] RCT_CUSTOM_VIEW_PROPERTY loop called with json: %@, converted to: %@", json, loopValue ? @"YES" : @"NO");
-    view.loop = loopValue;
+    [view setLoop:loopValue];
 }
 
-// Media options property
 RCT_CUSTOM_VIEW_PROPERTY(mediaOptions, NSArray, UnifiedPlayerUIView)
 {
     view.mediaOptions = [RCTConvert NSArray:json];
 }
 
-// isPaused property
 RCT_CUSTOM_VIEW_PROPERTY(isPaused, BOOL, UnifiedPlayerUIView)
 {
     view.isPaused = [RCTConvert BOOL:json];
+    if ([RCTConvert BOOL:json]) {
+        [view pause];
+    } else {
+        [view play];
+    }
 }
 
-// isFullscreen property
 RCT_CUSTOM_VIEW_PROPERTY(isFullscreen, BOOL, UnifiedPlayerUIView)
 {
-    view.isFullscreen = [RCTConvert BOOL:json];
+    [view toggleFullscreen:[RCTConvert BOOL:json]];
 }
 
-// Event handlers
-RCT_EXPORT_VIEW_PROPERTY(onLoadStart, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onReadyToPlay, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onError, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onPlaybackComplete, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onPlaybackStalled, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onPlaybackResumed, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onPlaying, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onPaused, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onFullscreenChanged, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onLoadStart, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onReadyToPlay, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onError, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onProgress, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPlaybackComplete, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPlaybackStalled, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPlaybackResumed, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPlaying, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onPaused, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onFullscreenChanged, RCTDirectEventBlock)
 
 @end

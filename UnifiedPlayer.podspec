@@ -23,10 +23,5 @@ else
   s.dependency "React-Core"
 end
 
-  # Add MobileVLCKit dependency with exact version to avoid compatibility issues
-  s.dependency "MobileVLCKit", "3.3.17"
-  
-  # Disable bitcode to match VLC requirements
-  s.pod_target_xcconfig = { "ENABLE_BITCODE" => "NO" }
-  s.user_target_xcconfig = { "ENABLE_BITCODE" => "NO" }
+  # AVFoundation is part of iOS SDK, no external dependency needed
 end

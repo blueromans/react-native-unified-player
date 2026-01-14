@@ -1,24 +1,32 @@
 #import <UIKit/UIKit.h>
 #import <React/RCTView.h>
 #import <React/RCTComponent.h>
-#import <MobileVLCKit/MobileVLCKit.h>
+#import <React/RCTBridge.h>
+#import <React/RCTViewManager.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CoreVideo.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface UnifiedPlayerUIView : UIView <VLCMediaPlayerDelegate>
+@class AVPlayer;
+@class AVPlayerLayer;
+@class AVPlayerItem;
 
-@property (nonatomic, strong) VLCMediaPlayer *player;
+@interface UnifiedPlayerUIView : UIView
+
+@property (nonatomic, strong) AVPlayer *player;
+@property (nonatomic, strong) AVPlayerLayer *playerLayer;
+@property (nonatomic, strong, nullable) AVPlayerItem *playerItem;
+@property (nonatomic, strong, nullable) id timeObserverToken;
 @property (nonatomic, copy, nullable) NSString *videoUrlString;
 @property (nonatomic, copy, nullable) NSString *thumbnailUrlString;
 @property (nonatomic, assign) BOOL autoplay;
 @property (nonatomic, assign) BOOL loop;
+@property (nonatomic, assign) float speed;
 @property (nonatomic, assign) BOOL isPaused;
 @property (nonatomic, assign) BOOL isFullscreen;
 @property (nonatomic, strong) NSArray *mediaOptions;
 @property (nonatomic, weak) RCTBridge *bridge;
-@property (nonatomic, assign) VLCMediaPlayerState previousState;
 @property (nonatomic, assign) BOOL hasRenderedVideo;
 @property (nonatomic, assign) BOOL readyEventSent;
 @property (nonatomic, assign) BOOL isRecording;
@@ -26,7 +34,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) AVAssetWriterInput *assetWriterVideoInput;
 @property (nonatomic, strong) AVAssetWriterInputPixelBufferAdaptor *assetWriterPixelBufferAdaptor;
 @property (nonatomic, strong) NSString *recordingPath;
-// We'll use associated objects instead of a property for CADisplayLink
 @property (nonatomic, assign) NSInteger frameCount;
 
 // Event callbacks
@@ -56,6 +63,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)startFrameCapture;
 - (NSString *)stopRecording;
 - (void)setSpeed:(float)speed;
+- (void)setLoop:(BOOL)loop;
 
 @end
 
