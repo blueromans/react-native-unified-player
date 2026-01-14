@@ -196,6 +196,13 @@ jobs:
           # Required permissions: Read and Write packages
           # Token type: Granular Access Token (Automation)
           # Note: Classic tokens are no longer supported as of Dec 2025
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify npm authentication
+        run: |
+          npm whoami || (echo "Error: npm authentication failed" && exit 1)
+          echo "✓ npm authenticated successfully"
 
       - name: Build package
         run: yarn prepare
@@ -207,3 +214,4 @@ jobs:
           # NPM_TOKEN: Granular access token with publish permissions
           # Must have "Read and Write packages" permission
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
