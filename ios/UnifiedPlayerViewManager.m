@@ -62,13 +62,13 @@
         _autoplay = YES;
         _loop = NO;
         _isFullscreen = NO;
-
+        
         // Add notification observers
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(appDidEnterBackground:)
                                                      name:UIApplicationDidEnterBackgroundNotification
                                                    object:nil];
-
+        
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(appDidBecomeActive:)
                                                      name:UIApplicationDidBecomeActiveNotification
@@ -121,8 +121,8 @@
 - (void)sendProgressEvent:(float)currentTime duration:(float)duration {
     if (self.onProgress) {
         self.onProgress(@{
-            @"currentTime": @(currentTime),
-            @"duration": @(duration)
+        @"currentTime": @(currentTime),
+        @"duration": @(duration)
         });
     }
 }
@@ -394,15 +394,20 @@
 
 - (void)play {
     if (_playerItem && _playerItem.status == AVPlayerItemStatusReadyToPlay) {
-        // Apply speed if set
-        if (_speed > 0 && _speed != 1.0f) {
-            float validSpeed = MAX(0.25f, MIN(4.0f, _speed));
-            _player.rate = validSpeed;
-        } else {
-            _player.rate = 1.0f;
-        }
-        
         [_player play];
+        
+        // Apply speed AFTER play() is called to ensure it's not reset
+        // Use a small delay to ensure play() has started
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self->_speed > 0 && self->_speed != 1.0f) {
+                float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
+                self->_player.rate = validSpeed;
+                RCTLogInfo(@"[UnifiedPlayerViewManager] Applied speed: %f after play", validSpeed);
+            } else {
+                self->_player.rate = 1.0f;
+            }
+        });
+        
         [self sendEvent:@"onPlaying" body:@{}];
         RCTLogInfo(@"[UnifiedPlayerViewManager] play called");
     } else {
@@ -492,17 +497,20 @@
 - (void)playerItemDidReachEnd:(NSNotification *)notification {
     RCTLogInfo(@"[UnifiedPlayerViewManager] Video ended, loop: %@", _loop ? @"YES" : @"NO");
     
-    if (_loop) {
+        if (_loop) {
         // Seek to beginning and play again
-        [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished) {
-            if (finished) {
-                // Restore playback speed before playing
-                if (self->_speed > 0 && self->_speed != 1.0f) {
-                    float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
-                    self->_player.rate = validSpeed;
-                    RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop", validSpeed);
-                }
-                [self->_player play];
+            [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished) {
+                if (finished) {
+                    [self->_player play];
+                // Restore playback speed AFTER play() is called
+                // Use a small delay to ensure play() has started
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (self->_speed > 0 && self->_speed != 1.0f) {
+                        float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
+                        self->_player.rate = validSpeed;
+                        RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop", validSpeed);
+                    }
+                });
                 RCTLogInfo(@"[UnifiedPlayerViewManager] Looped video - restarted from beginning");
             }
         }];
@@ -568,7 +576,7 @@
     // Generate the image
     [imageGenerator generateCGImagesAsynchronouslyForTimes:@[[NSValue valueWithCMTime:currentTime]]
                                           completionHandler:^(CMTime requestedTime, CGImageRef image, CMTime actualTime, AVAssetImageGeneratorResult result, NSError *error) {
-        if (error) {
+                if (error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, error);
             });

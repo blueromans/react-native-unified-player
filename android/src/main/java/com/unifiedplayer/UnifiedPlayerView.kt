@@ -181,6 +181,11 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
                     Log.d(TAG, "ExoPlayer is now playing")
                     // Hide thumbnail when video starts playing
                     thumbnailImageView?.visibility = View.GONE
+                    // Ensure playback speed is preserved when playback resumes (e.g., after loop)
+                    if (speed != 1.0f) {
+                        player?.setPlaybackSpeed(speed)
+                        Log.d(TAG, "Restored playback speed: $speed when playback resumed")
+                    }
                     sendEvent(EVENT_RESUMED, Arguments.createMap())
                     sendEvent(EVENT_PLAYING, Arguments.createMap())
                 } else {
