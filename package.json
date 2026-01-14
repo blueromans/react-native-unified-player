@@ -1,6 +1,6 @@
 {
   "name": "react-native-unified-player",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Unified Player",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
@@ -109,7 +109,9 @@
       "tagName": "v${version}",
       "requireCleanWorkingDir": false,
       "push": true,
-      "pushArgs": ["--force-with-lease"]
+      "pushArgs": [
+        "--force-with-lease"
+      ]
     },
     "npm": {
       "publish": true,
