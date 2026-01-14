@@ -496,6 +496,12 @@
         // Seek to beginning and play again
         [_player seekToTime:kCMTimeZero completionHandler:^(BOOL finished) {
             if (finished) {
+                // Restore playback speed before playing
+                if (self->_speed > 0 && self->_speed != 1.0f) {
+                    float validSpeed = MAX(0.25f, MIN(4.0f, self->_speed));
+                    self->_player.rate = validSpeed;
+                    RCTLogInfo(@"[UnifiedPlayerViewManager] Restored speed: %f for loop", validSpeed);
+                }
                 [self->_player play];
                 RCTLogInfo(@"[UnifiedPlayerViewManager] Looped video - restarted from beginning");
             }
