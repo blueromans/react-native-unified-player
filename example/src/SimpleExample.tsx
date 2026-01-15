@@ -25,6 +25,7 @@ export function SimpleExample({ onSwitchToFull }: SimpleExampleProps) {
   const [duration, setDuration] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const handleSpeedChange = async (newSpeed: number) => {
     try {
@@ -66,6 +67,21 @@ export function SimpleExample({ onSwitchToFull }: SimpleExampleProps) {
     }
   };
 
+  const handleToggleFullscreen = async () => {
+    try {
+      // Toggle fullscreen via ref - native side will send onFullscreenChanged event
+      await playerRef.current?.toggleFullscreen(!isFullscreen);
+    } catch (error) {
+      Alert.alert('Fullscreen Error', String(error));
+    }
+  };
+
+  const handleFullscreenChanged = (fullscreen: boolean) => {
+    // Update local state based on native fullscreen state changes
+    // This is the single source of truth for fullscreen state
+    setIsFullscreen(fullscreen);
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -83,13 +99,15 @@ export function SimpleExample({ onSwitchToFull }: SimpleExampleProps) {
         autoplay
         loop
         style={styles.player}
-        onProgress={(data: any) => {
-          // Handle both direct data and nativeEvent wrapper
-          const eventData = data?.nativeEvent || data;
-          if (eventData?.currentTime !== undefined)
-            setCurrentTime(eventData.currentTime);
-          if (eventData?.duration !== undefined)
-            setDuration(eventData.duration);
+        onFullscreenChanged={handleFullscreenChanged}
+        onProgress={(data) => {
+          // Data is already extracted by the wrapper in src/index.tsx
+          if (data?.currentTime !== undefined) {
+            setCurrentTime(data.currentTime);
+          }
+          if (data?.duration !== undefined) {
+            setDuration(data.duration);
+          }
         }}
         onPlaybackComplete={handlePlaybackComplete}
       />
@@ -105,6 +123,12 @@ export function SimpleExample({ onSwitchToFull }: SimpleExampleProps) {
       />
 
       <SpeedControl currentSpeed={speed} onSpeedChange={handleSpeedChange} />
+
+      <ControlButton
+        title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+        onPress={handleToggleFullscreen}
+        variant={isFullscreen ? 'success' : 'primary'}
+      />
 
       <ControlButton title="Capture" onPress={handleCapture} />
 

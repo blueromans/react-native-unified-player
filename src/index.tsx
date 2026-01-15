@@ -154,6 +154,21 @@ export const UnifiedPlayerView = forwardRef<
   UnifiedPlayerRef,
   UnifiedPlayerProps
 >((props, ref) => {
+  // Destructure all event handlers at the top to satisfy ESLint exhaustive-deps
+  const {
+    onLoadStart,
+    onReadyToPlay,
+    onError,
+    onProgress,
+    onPlaybackComplete,
+    onPlaybackStalled,
+    onPlaybackResumed,
+    onPaused,
+    onPlaying,
+    onFullscreenChanged,
+    ...restProps
+  } = props;
+
   const nativeRef = useRef<any>(null);
 
   const getViewTag = useCallback((): number | null => {
@@ -194,6 +209,77 @@ export const UnifiedPlayerView = forwardRef<
     [getViewTag]
   );
 
+  // Wrap event handlers to extract data immediately and avoid event pooling warnings
+  // Must extract nativeEvent data synchronously before React recycles the event
+  const wrappedOnProgress = useCallback(
+    (event: any) => {
+      if (!onProgress) return;
+      // Extract data synchronously - access nativeEvent immediately
+      const nativeEvent = event?.nativeEvent;
+      const currentTime = nativeEvent?.currentTime ?? event?.currentTime;
+      const duration = nativeEvent?.duration ?? event?.duration;
+      onProgress({ currentTime, duration });
+    },
+    [onProgress]
+  );
+
+  const wrappedOnFullscreenChanged = useCallback(
+    (event: any) => {
+      if (!onFullscreenChanged) return;
+      // Extract data synchronously - access nativeEvent immediately
+      const nativeEvent = event?.nativeEvent;
+      const fullscreen =
+        nativeEvent?.isFullscreen ?? event?.isFullscreen ?? false;
+      onFullscreenChanged(fullscreen);
+    },
+    [onFullscreenChanged]
+  );
+
+  const wrappedOnError = useCallback(
+    (event: any) => {
+      if (!onError) return;
+      // Extract error data synchronously
+      const nativeEvent = event?.nativeEvent;
+      const error = {
+        code: nativeEvent?.code ?? event?.code ?? 'UNKNOWN',
+        message: nativeEvent?.message ?? event?.message ?? 'Unknown error',
+        nativeError: nativeEvent?.nativeError ?? event?.nativeError,
+      };
+      onError(error);
+    },
+    [onError]
+  );
+
+  // Wrap simple event handlers to prevent synthetic event access issues
+  const wrappedOnLoadStart = useCallback(
+    (_event: any) => onLoadStart?.(),
+    [onLoadStart]
+  );
+  const wrappedOnReadyToPlay = useCallback(
+    (_event: any) => onReadyToPlay?.(),
+    [onReadyToPlay]
+  );
+  const wrappedOnPlaybackComplete = useCallback(
+    (_event: any) => onPlaybackComplete?.(),
+    [onPlaybackComplete]
+  );
+  const wrappedOnPlaybackStalled = useCallback(
+    (_event: any) => onPlaybackStalled?.(),
+    [onPlaybackStalled]
+  );
+  const wrappedOnPlaybackResumed = useCallback(
+    (_event: any) => onPlaybackResumed?.(),
+    [onPlaybackResumed]
+  );
+  const wrappedOnPaused = useCallback(
+    (_event: any) => onPaused?.(),
+    [onPaused]
+  );
+  const wrappedOnPlaying = useCallback(
+    (_event: any) => onPlaying?.(),
+    [onPlaying]
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -214,11 +300,11 @@ export const UnifiedPlayerView = forwardRef<
         ),
       stopRecording: () =>
         callNativeMethod('stopRecording', NativeModule.stopRecording),
-      toggleFullscreen: (isFullscreen: boolean) =>
+      toggleFullscreen: (fullscreen: boolean) =>
         callNativeMethod(
           'toggleFullscreen',
           NativeModule.toggleFullscreen,
-          isFullscreen
+          fullscreen
         ),
       setSpeed: (speed: number) =>
         callNativeMethod('setSpeed', NativeModule.setSpeed, speed),
@@ -226,5 +312,24 @@ export const UnifiedPlayerView = forwardRef<
     [callNativeMethod]
   );
 
-  return <NativeUnifiedPlayerView {...props} ref={nativeRef} />;
+  // Build native props with wrapped event handlers to avoid event pooling warnings
+  const nativeProps = {
+    ...restProps,
+    onLoadStart: onLoadStart ? wrappedOnLoadStart : undefined,
+    onReadyToPlay: onReadyToPlay ? wrappedOnReadyToPlay : undefined,
+    onError: onError ? wrappedOnError : undefined,
+    onProgress: onProgress ? wrappedOnProgress : undefined,
+    onPlaybackComplete: onPlaybackComplete
+      ? wrappedOnPlaybackComplete
+      : undefined,
+    onPlaybackStalled: onPlaybackStalled ? wrappedOnPlaybackStalled : undefined,
+    onPlaybackResumed: onPlaybackResumed ? wrappedOnPlaybackResumed : undefined,
+    onPaused: onPaused ? wrappedOnPaused : undefined,
+    onPlaying: onPlaying ? wrappedOnPlaying : undefined,
+    onFullscreenChanged: onFullscreenChanged
+      ? wrappedOnFullscreenChanged
+      : undefined,
+  };
+
+  return <NativeUnifiedPlayerView {...nativeProps} ref={nativeRef} />;
 });

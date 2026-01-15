@@ -8,7 +8,6 @@ PODS:
   - hermes-engine (0.78.2):
     - hermes-engine/Pre-built (= 0.78.2)
   - hermes-engine/Pre-built (0.78.2)
-  - MobileVLCKit (3.3.17)
   - RCT-Folly (2024.11.18.00):
     - boost
     - DoubleConversion
@@ -1527,11 +1526,10 @@ PODS:
     - React-perflogger (= 0.78.2)
     - React-utils (= 0.78.2)
   - SocketRocket (0.7.1)
-  - UnifiedPlayer (0.4.1):
+  - UnifiedPlayer (0.6.2):
     - DoubleConversion
     - glog
     - hermes-engine
-    - MobileVLCKit (= 3.3.17)
     - RCT-Folly (= 2024.11.18.00)
     - RCTRequired
     - RCTTypeSafety
@@ -1624,7 +1622,6 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
-    - MobileVLCKit
     - SocketRocket
 
 EXTERNAL SOURCES:
@@ -1772,7 +1769,6 @@ SPEC CHECKSUMS:
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: eb93e2f488219332457c3c4eafd2738ddc7e80b8
   hermes-engine: 2771b98fb813fdc6f92edd7c9c0035ecabf9fee7
-  MobileVLCKit: c5dd1b0ae933dc9c2348099840e753496dcdd908
   RCT-Folly: e78785aa9ba2ed998ea4151e314036f6c49e6d82
   RCTDeprecation: be794de7dc6ed8f9f7fbf525f86e7651b8b68746
   RCTRequired: a83787b092ec554c2eb6019ff3f5b8d125472b3b
@@ -1832,9 +1828,9 @@ SPEC CHECKSUMS:
   ReactCodegen: 99ea3536c05be3c18d0c517acb56b5a6d726fc7b
   ReactCommon: 865ebe76504a95e115b6229dd00a31e56d2d4bfe
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  UnifiedPlayer: c783ef3eb71d43466076ab277d7ba8df0bcdc1ef
+  UnifiedPlayer: 22e4fd5611514dcbfc1f4316e1a3908c2e32f370
   Yoga: e14bad835e12b6c7e2260fc320bd00e0f4b45add
 
 PODFILE CHECKSUM: 89ddaf8ef6736dd21f8918101d6a0e0c907a198f
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2

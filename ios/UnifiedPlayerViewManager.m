@@ -8,6 +8,7 @@
 #import <React/RCTComponent.h>
 #import <React/RCTConvert.h>
 #import <AVFoundation/AVFoundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "UnifiedPlayerModule.h"
 #import "UnifiedPlayerUIView.h"
@@ -19,6 +20,8 @@
     UIView *_originalSuperview;
     NSUInteger _originalIndex;
     UIView *_fullscreenContainer;
+    UIViewController *_fullscreenViewController;
+    UIButton *_fullscreenCloseButton;
     float _cachedDuration;
     BOOL _isObservingPlayerItem;
 }
@@ -544,11 +547,258 @@
 #pragma mark - Fullscreen
 
 - (void)toggleFullscreen:(BOOL)fullscreen {
-    // Fullscreen implementation would go here
-    // For now, just update the flag
+    if (_isFullscreen == fullscreen) {
+        return; // Already in the requested state
+    }
+    
     _isFullscreen = fullscreen;
-    if (self.onFullscreenChanged) {
-        self.onFullscreenChanged(@{@"isFullscreen": @(fullscreen)});
+    
+    // Get root view controller
+    UIViewController *rootViewController = nil;
+    UIWindow *window = nil;
+    
+    // Get key window - try modern API first (iOS 13+)
+    if (@available(iOS 13.0, *)) {
+        NSSet<UIScene *> *connectedScenes = [[UIApplication sharedApplication] connectedScenes];
+        for (UIScene *scene in connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *w in windowScene.windows) {
+                    if (w.isKeyWindow) {
+                        window = w;
+                        break;
+                    }
+                }
+                if (window) break;
+            }
+        }
+    }
+    
+    // Fallback: use deprecated keyWindow (iOS 12 and earlier, or if no scene found)
+    if (!window) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        window = [[UIApplication sharedApplication] keyWindow];
+        #pragma clang diagnostic pop
+    }
+    
+    if (!window) {
+        RCTLogError(@"[UnifiedPlayerViewManager] Could not find window for fullscreen");
+        if (self.onFullscreenChanged) {
+            self.onFullscreenChanged(@{@"isFullscreen": @(NO)});
+        }
+        _isFullscreen = NO;
+        return;
+    }
+    
+    rootViewController = window.rootViewController;
+    
+    // Navigate to the topmost view controller
+    while (rootViewController.presentedViewController) {
+        rootViewController = rootViewController.presentedViewController;
+    }
+    
+    if (!rootViewController) {
+        RCTLogError(@"[UnifiedPlayerViewManager] Could not find root view controller for fullscreen");
+        if (self.onFullscreenChanged) {
+            self.onFullscreenChanged(@{@"isFullscreen": @(NO)});
+        }
+        _isFullscreen = NO;
+        return;
+    }
+    
+    if (fullscreen) {
+        // Enter fullscreen
+        [self enterFullscreenWithViewController:rootViewController];
+    } else {
+        // Exit fullscreen
+        [self exitFullscreen];
+    }
+}
+
+- (void)enterFullscreenWithViewController:(UIViewController *)rootViewController {
+    // Save original frame and superview
+    _originalFrame = self.frame;
+    _originalSuperview = self.superview;
+    if (_originalSuperview) {
+        _originalIndex = [_originalSuperview.subviews indexOfObject:self];
+    } else {
+        _originalIndex = NSNotFound;
+    }
+
+    // Create fullscreen container view controller
+    _fullscreenViewController = [[UIViewController alloc] init];
+    _fullscreenViewController.view.backgroundColor = [UIColor blackColor];
+    _fullscreenViewController.modalPresentationStyle = UIModalPresentationFullScreen;
+
+    // Create container view for the player
+    _fullscreenContainer = [[UIView alloc] initWithFrame:rootViewController.view.bounds];
+    _fullscreenContainer.backgroundColor = [UIColor blackColor];
+    [_fullscreenViewController.view addSubview:_fullscreenContainer];
+
+    // Move player to fullscreen container
+    CGRect screenBounds = [[UIScreen mainScreen] bounds];
+    self.frame = screenBounds;
+    [_fullscreenContainer addSubview:self];
+
+    // Update player layer frame
+    _playerLayer.frame = screenBounds;
+
+    // Create close button
+    _fullscreenCloseButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    _fullscreenCloseButton.translatesAutoresizingMaskIntoConstraints = NO;
+
+    // Create X icon using SF Symbols (iOS 13+) or fallback to text
+    if (@available(iOS 13.0, *)) {
+        UIImage *closeImage = [UIImage systemImageNamed:@"xmark.circle.fill"];
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:28 weight:UIImageSymbolWeightMedium];
+        closeImage = [closeImage imageByApplyingSymbolConfiguration:config];
+        [_fullscreenCloseButton setImage:closeImage forState:UIControlStateNormal];
+        _fullscreenCloseButton.tintColor = [UIColor whiteColor];
+    } else {
+        // Fallback for iOS 12
+        [_fullscreenCloseButton setTitle:@"✕" forState:UIControlStateNormal];
+        _fullscreenCloseButton.titleLabel.font = [UIFont boldSystemFontOfSize:24];
+        [_fullscreenCloseButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    }
+
+    // Style the button with semi-transparent background
+    _fullscreenCloseButton.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.5];
+    _fullscreenCloseButton.layer.cornerRadius = 22;
+    _fullscreenCloseButton.clipsToBounds = YES;
+
+    // Add action
+    [_fullscreenCloseButton addTarget:self action:@selector(closeButtonTapped) forControlEvents:UIControlEventTouchUpInside];
+
+    // Add to fullscreen container
+    [_fullscreenContainer addSubview:_fullscreenCloseButton];
+
+    // Position in top-right corner with safe area
+    [NSLayoutConstraint activateConstraints:@[
+        [_fullscreenCloseButton.widthAnchor constraintEqualToConstant:44],
+        [_fullscreenCloseButton.heightAnchor constraintEqualToConstant:44],
+        [_fullscreenCloseButton.topAnchor constraintEqualToAnchor:_fullscreenContainer.safeAreaLayoutGuide.topAnchor constant:16],
+        [_fullscreenCloseButton.trailingAnchor constraintEqualToAnchor:_fullscreenContainer.safeAreaLayoutGuide.trailingAnchor constant:-16]
+    ]];
+
+    // Configure orientation
+    NSNumber *orientationValue = [NSNumber numberWithInt:UIInterfaceOrientationLandscapeRight];
+    [[UIDevice currentDevice] setValue:orientationValue forKey:@"orientation"];
+
+    // Present fullscreen view controller
+    [rootViewController presentViewController:_fullscreenViewController animated:YES completion:^{
+        // Force landscape orientation
+        [UIViewController attemptRotationToDeviceOrientation];
+
+        // Send event
+        if (self.onFullscreenChanged) {
+            self.onFullscreenChanged(@{@"isFullscreen": @(YES)});
+        }
+    }];
+}
+
+- (void)closeButtonTapped {
+    [self exitFullscreen];
+}
+
+- (void)exitFullscreen {
+    // Restore portrait orientation first
+    NSNumber *orientationValue = [NSNumber numberWithInt:UIInterfaceOrientationPortrait];
+    [[UIDevice currentDevice] setValue:orientationValue forKey:@"orientation"];
+    
+    // Dismiss fullscreen view controller if we have a reference to it
+    if (_fullscreenViewController && _fullscreenViewController.presentingViewController) {
+        [_fullscreenViewController dismissViewControllerAnimated:YES completion:^{
+            // Restore player to original position
+            [self restorePlayerFromFullscreen];
+            
+            // Force portrait orientation
+            [UIViewController attemptRotationToDeviceOrientation];
+            
+            // Send event
+            if (self.onFullscreenChanged) {
+                self.onFullscreenChanged(@{@"isFullscreen": @(NO)});
+            }
+        }];
+    } else {
+        // Fallback: try to find and dismiss any presented view controller
+        UIWindow *window = nil;
+        
+        // Get key window - try modern API first (iOS 13+)
+        if (@available(iOS 13.0, *)) {
+            NSSet<UIScene *> *connectedScenes = [[UIApplication sharedApplication] connectedScenes];
+            for (UIScene *scene in connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
+                        if (w.isKeyWindow) {
+                            window = w;
+                            break;
+                        }
+                    }
+                    if (window) break;
+                }
+            }
+        }
+        
+        // Fallback: use deprecated keyWindow (iOS 12 and earlier, or if no scene found)
+        if (!window) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            window = [[UIApplication sharedApplication] keyWindow];
+            #pragma clang diagnostic pop
+        }
+        
+        if (window) {
+            UIViewController *rootVC = window.rootViewController;
+            while (rootVC.presentedViewController) {
+                rootVC = rootVC.presentedViewController;
+            }
+            
+            if (rootVC.presentingViewController) {
+                [rootVC dismissViewControllerAnimated:YES completion:^{
+                    [self restorePlayerFromFullscreen];
+                    [UIViewController attemptRotationToDeviceOrientation];
+                    if (self.onFullscreenChanged) {
+                        self.onFullscreenChanged(@{@"isFullscreen": @(NO)});
+                    }
+                }];
+                return;
+            }
+        }
+        
+        // Last resort: just restore player position
+        [self restorePlayerFromFullscreen];
+        [UIViewController attemptRotationToDeviceOrientation];
+        if (self.onFullscreenChanged) {
+            self.onFullscreenChanged(@{@"isFullscreen": @(NO)});
+        }
+    }
+}
+
+- (void)restorePlayerFromFullscreen {
+    if (_originalSuperview && _originalIndex != NSNotFound) {
+        // Restore original frame
+        self.frame = _originalFrame;
+
+        // Move back to original superview
+        [self removeFromSuperview];
+
+        // Insert at original index
+        if (_originalIndex < _originalSuperview.subviews.count) {
+            [_originalSuperview insertSubview:self atIndex:_originalIndex];
+        } else {
+            [_originalSuperview addSubview:self];
+        }
+
+        // Update player layer frame
+        _playerLayer.frame = self.bounds;
+
+        // Clean up
+        _originalSuperview = nil;
+        _fullscreenContainer = nil;
+        _fullscreenViewController = nil;
+        _fullscreenCloseButton = nil;
     }
 }
 

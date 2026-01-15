@@ -85,14 +85,17 @@ function App(): React.JSX.Element {
     };
   }, [progressEventsReceived, reinitializePlayer]);
 
-  const handleProgress = (data: any) => {
-    // Handle both direct data and nativeEvent wrapper
-    const eventData = data?.nativeEvent || data;
-    if (eventData?.duration && eventData.duration > 0) {
-      setCurrentTime(eventData.currentTime ?? 0);
-      setDuration(eventData.duration);
-      lastProgressTimeRef.current = eventData.currentTime ?? 0;
-      lastDurationRef.current = eventData.duration;
+  const handleProgress = (data: { currentTime: number; duration: number }) => {
+    // Data is already extracted by the wrapper in src/index.tsx
+    const progressTime = data?.currentTime;
+    const progressDuration = data?.duration;
+
+    if (progressDuration && progressDuration > 0) {
+      const timeValue = progressTime ?? 0;
+      setCurrentTime(timeValue);
+      setDuration(progressDuration);
+      lastProgressTimeRef.current = timeValue;
+      lastDurationRef.current = progressDuration;
       if (!progressEventsReceived) {
         setProgressEventsReceived(true);
         console.log('Progress events are being received with valid data');
