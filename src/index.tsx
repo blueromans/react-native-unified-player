@@ -101,9 +101,36 @@ export type UnifiedPlayerProps = {
   onFullscreenChanged?: (isFullscreen: boolean) => void;
 };
 
+// Internal type for native component props (accepts native event objects)
+type NativeEventHandler = (event: any) => void;
+type NativeUnifiedPlayerProps = Omit<
+  UnifiedPlayerProps,
+  | 'onLoadStart'
+  | 'onReadyToPlay'
+  | 'onError'
+  | 'onProgress'
+  | 'onPlaybackComplete'
+  | 'onPlaybackStalled'
+  | 'onPlaybackResumed'
+  | 'onPaused'
+  | 'onPlaying'
+  | 'onFullscreenChanged'
+> & {
+  onLoadStart?: NativeEventHandler;
+  onReadyToPlay?: NativeEventHandler;
+  onError?: NativeEventHandler;
+  onProgress?: NativeEventHandler;
+  onPlaybackComplete?: NativeEventHandler;
+  onPlaybackStalled?: NativeEventHandler;
+  onPlaybackResumed?: NativeEventHandler;
+  onPaused?: NativeEventHandler;
+  onPlaying?: NativeEventHandler;
+  onFullscreenChanged?: NativeEventHandler;
+};
+
 // Native component registration
 const NativeUnifiedPlayerView =
-  requireNativeComponent<UnifiedPlayerProps>('UnifiedPlayerView');
+  requireNativeComponent<NativeUnifiedPlayerProps>('UnifiedPlayerView');
 
 // Native module for player control methods
 const NativeModule = NativeModules.UnifiedPlayer;
@@ -252,31 +279,45 @@ export const UnifiedPlayerView = forwardRef<
 
   // Wrap simple event handlers to prevent synthetic event access issues
   const wrappedOnLoadStart = useCallback(
-    (_event: any) => onLoadStart?.(),
+    (_event: any): void => {
+      onLoadStart?.();
+    },
     [onLoadStart]
   );
   const wrappedOnReadyToPlay = useCallback(
-    (_event: any) => onReadyToPlay?.(),
+    (_event: any): void => {
+      onReadyToPlay?.();
+    },
     [onReadyToPlay]
   );
   const wrappedOnPlaybackComplete = useCallback(
-    (_event: any) => onPlaybackComplete?.(),
+    (_event: any): void => {
+      onPlaybackComplete?.();
+    },
     [onPlaybackComplete]
   );
   const wrappedOnPlaybackStalled = useCallback(
-    (_event: any) => onPlaybackStalled?.(),
+    (_event: any): void => {
+      onPlaybackStalled?.();
+    },
     [onPlaybackStalled]
   );
   const wrappedOnPlaybackResumed = useCallback(
-    (_event: any) => onPlaybackResumed?.(),
+    (_event: any): void => {
+      onPlaybackResumed?.();
+    },
     [onPlaybackResumed]
   );
   const wrappedOnPaused = useCallback(
-    (_event: any) => onPaused?.(),
+    (_event: any): void => {
+      onPaused?.();
+    },
     [onPaused]
   );
   const wrappedOnPlaying = useCallback(
-    (_event: any) => onPlaying?.(),
+    (_event: any): void => {
+      onPlaying?.();
+    },
     [onPlaying]
   );
 
@@ -313,7 +354,7 @@ export const UnifiedPlayerView = forwardRef<
   );
 
   // Build native props with wrapped event handlers to avoid event pooling warnings
-  const nativeProps = {
+  const nativeProps: NativeUnifiedPlayerProps = {
     ...restProps,
     onLoadStart: onLoadStart ? wrappedOnLoadStart : undefined,
     onReadyToPlay: onReadyToPlay ? wrappedOnReadyToPlay : undefined,
