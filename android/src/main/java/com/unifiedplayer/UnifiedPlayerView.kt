@@ -30,6 +30,10 @@ import android.os.Environment
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.os.Build
+import android.view.Gravity
+import android.widget.Button
+import android.graphics.drawable.GradientDrawable
+import android.util.TypedValue
 
 class UnifiedPlayerView(context: Context) : FrameLayout(context) {
     companion object {
@@ -69,7 +73,9 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
     private var originalLayoutParams: ViewGroup.LayoutParams? = null
     private var originalParent: ViewGroup? = null
     private var originalIndex: Int = 0
-    private var fullscreenContainer: ViewGroup? = null
+    private var fullscreenContainer: FrameLayout? = null
+    private var closeButton: Button? = null
+    private var isTransitioningFullscreen = false // Flag to prevent player release during fullscreen transition
 
     private val progressHandler = Handler(Looper.getMainLooper())
     private val progressRunnable: Runnable = object : Runnable {
@@ -420,9 +426,74 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
         // Add FLAG_KEEP_SCREEN_ON to prevent screen from turning off during playback
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Simply inform React Native that we want fullscreen
-        // The React Native side should handle hiding other UI elements
-        Log.d(TAG, "Fullscreen mode activated - orientation changed to landscape")
+        // Save original parent and layout params
+        originalParent = parent as? ViewGroup
+        originalLayoutParams = layoutParams
+        originalIndex = originalParent?.indexOfChild(this) ?: 0
+
+        // Set flag to prevent player release during transition
+        isTransitioningFullscreen = true
+
+        // Remove from current parent
+        originalParent?.removeView(this)
+
+        // Create fullscreen container
+        fullscreenContainer = FrameLayout(context).apply {
+            setBackgroundColor(Color.BLACK)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        // Add player to fullscreen container
+        fullscreenContainer?.addView(this, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+
+        // Create close button
+        closeButton = Button(context).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+
+            // Create circular background
+            val drawable = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(128, 0, 0, 0)) // Semi-transparent black
+            }
+            background = drawable
+
+            // Set button size (44dp x 44dp for touch target)
+            val buttonSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 44f, resources.displayMetrics
+            ).toInt()
+
+            layoutParams = FrameLayout.LayoutParams(buttonSize, buttonSize).apply {
+                gravity = Gravity.TOP or Gravity.END
+                val margin = TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, 16f, resources.displayMetrics
+                ).toInt()
+                setMargins(margin, margin, margin, margin)
+            }
+
+            setOnClickListener {
+                setIsFullscreen(false)
+            }
+        }
+
+        // Add close button to fullscreen container
+        fullscreenContainer?.addView(closeButton)
+
+        // Add fullscreen container to the decor view (root)
+        val decorView = activity.window.decorView as? ViewGroup
+        decorView?.addView(fullscreenContainer)
+
+        // Reset transition flag
+        isTransitioningFullscreen = false
+
+        Log.d(TAG, "Fullscreen mode activated - player moved to fullscreen container")
     }
 
     private fun exitFullscreen(activity: Activity) {
@@ -445,7 +516,36 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
         // Remove FLAG_KEEP_SCREEN_ON
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        Log.d(TAG, "Fullscreen mode exited - orientation restored")
+        // Set flag to prevent player release during transition
+        isTransitioningFullscreen = true
+
+        // Remove player from fullscreen container
+        fullscreenContainer?.removeView(this)
+
+        // Remove fullscreen container from decor view
+        val decorView = activity.window.decorView as? ViewGroup
+        fullscreenContainer?.let { container ->
+            decorView?.removeView(container)
+        }
+
+        // Restore player to original parent
+        originalParent?.let { parent ->
+            // Add back at original index with original layout params
+            originalLayoutParams?.let { params ->
+                parent.addView(this, originalIndex.coerceAtMost(parent.childCount), params)
+            } ?: parent.addView(this, originalIndex.coerceAtMost(parent.childCount))
+        }
+
+        // Reset transition flag
+        isTransitioningFullscreen = false
+
+        // Clean up references
+        closeButton = null
+        fullscreenContainer = null
+        originalParent = null
+        originalLayoutParams = null
+
+        Log.d(TAG, "Fullscreen mode exited - player restored to original position")
     }
 
     fun play() {
@@ -602,7 +702,14 @@ class UnifiedPlayerView(context: Context) : FrameLayout(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        Log.d(TAG, "UnifiedPlayerView onDetachedFromWindow")
+        Log.d(TAG, "UnifiedPlayerView onDetachedFromWindow, isTransitioningFullscreen: $isTransitioningFullscreen")
+
+        // Don't release player during fullscreen transitions
+        if (isTransitioningFullscreen) {
+            Log.d(TAG, "Skipping player release - fullscreen transition in progress")
+            return
+        }
+
         stopProgressUpdates() // Stop progress updates
         player?.release()
         player = null // Ensure player is nullified
