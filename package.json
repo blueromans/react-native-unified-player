@@ -1,6 +1,6 @@
 {
   "name": "react-native-unified-player",
-  "version": "2.0.0",
+  "version": "1.0.1",
   "description": "Unified Player",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
@@ -132,7 +132,8 @@
       "@release-it/conventional-changelog": {
         "preset": {
           "name": "angular"
-        }
+        },
+        "ignoreRecommendedBump": true
       }
     },
     "hooks": {

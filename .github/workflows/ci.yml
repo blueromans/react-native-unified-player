@@ -110,17 +110,30 @@ jobs:
 
       - name: Create Release and Publish
         run: |
-          # Check if version already exists in npm
+          # Get current version from package.json
           CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version in package.json: ${CURRENT_VERSION}"
+
+          # Check if version already exists in npm
           if npm view react-native-unified-player@${CURRENT_VERSION} version > /dev/null 2>&1; then
-            echo "Version ${CURRENT_VERSION} already published, skipping npm publish"
-            # Only create git tag and release if not exists
-            if ! git rev-parse "v${CURRENT_VERSION}" > /dev/null 2>&1; then
-              git tag "v${CURRENT_VERSION}"
-              git push origin "v${CURRENT_VERSION}" || true
-            fi
+            echo "Version ${CURRENT_VERSION} already published on npm"
+
+            # Get latest version from npm and increment patch
+            LATEST_VERSION=$(npm view react-native-unified-player version 2>/dev/null || echo "0.0.0")
+            echo "Latest npm version: ${LATEST_VERSION}"
+
+            # Increment patch version
+            NEW_VERSION=$(node -p "const v = '${LATEST_VERSION}'.split('.'); v[2] = parseInt(v[2]) + 1; v.join('.')")
+            echo "New version: ${NEW_VERSION}"
+
+            # Update package.json with new version
+            npm version ${NEW_VERSION} --no-git-tag-version
+
+            # Run release with the new version (no auto-increment)
+            yarn run release --ci --no-increment
           else
-            yarn run release --ci
+            # Version doesn't exist, publish as-is (no auto-increment)
+            yarn run release --ci --no-increment
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
