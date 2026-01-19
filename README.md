@@ -1,172 +1,474 @@
-# react-native-unified-player
+<p align="center">
+  <img src="https://img.shields.io/npm/v/react-native-unified-player?style=flat-square&color=blue" alt="npm version" />
+  <img src="https://img.shields.io/npm/dm/react-native-unified-player?style=flat-square&color=green" alt="npm downloads" />
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android-lightgrey?style=flat-square" alt="platforms" />
+  <img src="https://img.shields.io/github/license/blueromans/react-native-unified-player?style=flat-square" alt="license" />
+</p>
 
-Unified Player
+<h1 align="center">React Native Unified Player</h1>
 
-A React Native component for playing videos via URL, built with Fabric.
+<p align="center">
+  <b>A high-performance video player for React Native</b><br/>
+  Built with <a href="https://github.com/mrousavy/nitro">Nitro Modules</a> for blazing-fast native performance
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#api-reference">API</a> •
+  <a href="#examples">Examples</a>
+</p>
+
+---
 
 ## Features
 
-- 🎥 Play videos from a URL source
-- 📱 Native performance with Fabric architecture
-- 📊 Event handling for player states (Ready, Error, Progress, Complete, Stalled, Resumed)
-- 🎛️ Control playback with methods (Play, Pause, Seek, Get Current Time, Get Duration)
-- 🔄 Optional autoplay and loop
+| Feature | iOS | Android |
+|---------|:---:|:-------:|
+| HLS / DASH Streaming | ✅ | ✅ |
+| Local & Remote Files | ✅ | ✅ |
+| Fullscreen Mode | ✅ | ✅ |
+| Picture-in-Picture | ✅ | ✅ |
+| Background Playback | ✅ | ✅ |
+| Notification Controls | ✅ | ✅ |
+| Subtitles / Text Tracks | ✅ | ✅ |
+| Playback Speed Control | ✅ | ✅ |
+| Frame Capture | ✅ | ✅ |
+| DRM Support | 🔜 | 🔜 |
+
+**Why Unified Player?**
+
+- **Nitro Modules** - Direct native calls without bridge overhead
+- **AVPlayer & ExoPlayer** - Industry-standard players under the hood
+- **Declarative API** - Modern React hooks-based architecture
+- **TypeScript First** - Full type safety out of the box
+
+---
 
 ## Installation
 
 ```bash
-yarn add react-native-unified-player
+# Using yarn
+yarn add react-native-unified-player react-native-nitro-modules
+
+# Using npm
+npm install react-native-unified-player react-native-nitro-modules
 ```
 
-or
+### iOS Setup
 
 ```bash
-npm install react-native-unified-player
+cd ios && pod install
 ```
 
-## Usage
+### Android Setup
 
-### Basic Usage
+No additional configuration required.
 
-```typescript
-import { UnifiedPlayerView, UnifiedPlayer, UnifiedPlayerEventTypes, UnifiedPlayerEvents } from 'react-native-unified-player';
-import React, { useRef, useEffect } from 'react';
-import { View } from 'react-native';
+---
 
-const MyPlayerComponent = () => {
-  const playerRef = useRef(null);
+## Quick Start
 
-  // Example of using event listeners (optional)
-  useEffect(() => {
-    const readyListener = UnifiedPlayerEvents.addListener(UnifiedPlayerEventTypes.READY, () => {
-      console.log('Player is ready to play');
-      // You can call UnifiedPlayer methods here, e.g., UnifiedPlayer.play(playerRef.current.getNativeTag());
+```tsx
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
+import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
+
+export default function App() {
+  const player = useVideoPlayer({
+    uri: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+  });
+
+  return (
+    <View style={styles.container}>
+      <UnifiedPlayerView
+        player={player}
+        style={styles.video}
+        controls
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  video: { width: '100%', aspectRatio: 16 / 9 },
+});
+```
+
+---
+
+## Examples
+
+<details>
+<summary><b>🎮 With Playback Controls</b></summary>
+
+```tsx
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
+
+export default function PlayerWithControls() {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, duration: 0 });
+
+  const player = useVideoPlayer({ uri: 'https://example.com/video.mp4' }, (p) => {
+    p.loop = true;
+
+    p.addEventListener('onPlaybackStateChange', ({ isPlaying }) => {
+      setIsPlaying(isPlaying);
     });
 
-    const errorListener = UnifiedPlayerEvents.addListener(UnifiedPlayerEventTypes.ERROR, (error) => {
-      console.error('Player error:', error);
+    p.addEventListener('onProgress', ({ currentTime, duration }) => {
+      setProgress({ current: currentTime, duration });
     });
+  });
 
-    // Add other listeners as needed (PROGRESS, COMPLETE, STALLED, RESUMED)
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
-    return () => {
-      // Clean up listeners on unmount
-      readyListener.remove();
-      errorListener.remove();
-      // Remove other listeners
-    };
-  }, []);
+  return (
+    <View style={styles.container}>
+      <UnifiedPlayerView player={player} style={styles.video} />
+
+      <View style={styles.controls}>
+        <TouchableOpacity onPress={() => player.seekBy(-10)}>
+          <Text style={styles.button}>-10s</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => isPlaying ? player.pause() : player.play()}>
+          <Text style={styles.button}>{isPlaying ? '⏸️' : '▶️'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => player.seekBy(10)}>
+          <Text style={styles.button}>+10s</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.time}>
+        {formatTime(progress.current)} / {formatTime(progress.duration)}
+      </Text>
+    </View>
+  );
+}
+```
+
+</details>
+
+<details>
+<summary><b>📺 Fullscreen Mode</b></summary>
+
+```tsx
+import React, { useState } from 'react';
+import { View, Button } from 'react-native';
+import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
+
+export default function FullscreenExample() {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const player = useVideoPlayer({ uri: 'https://example.com/video.mp4' });
 
   return (
     <View style={{ flex: 1 }}>
       <UnifiedPlayerView
-        ref={playerRef}
-        style={{ width: '100%', height: 300 }} // Example style
-        videoUrl="YOUR_VIDEO_URL_HERE" // Replace with your video URL
-        autoplay={false} // Optional: set to true to autoplay
-        loop={false} // Optional: set to true to loop
-        // You can also use direct view props instead of or in addition to event listeners:
-        // onReadyToPlay={() => console.log('View prop: Ready to play')}
-        // onError={(e) => console.log('View prop: Error', e)}
-        // onPlaybackComplete={() => console.log('View prop: Playback complete')}
-        // onProgress={(data) => console.log('View prop: Progress', data)}
+        player={player}
+        style={{ width: '100%', aspectRatio: 16 / 9 }}
+        fullscreen={isFullscreen}
+        onFullscreenChange={setIsFullscreen}
+      />
+
+      <Button
+        title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+        onPress={() => setIsFullscreen(!isFullscreen)}
       />
     </View>
   );
-};
-
-export default MyPlayerComponent;
+}
 ```
 
-## Props
+</details>
 
-| Prop | Type | Required | Description |
-|------|------|----------|-------------|
-| `videoUrl` | `string` \| `string[]` | Yes | Video source URL or an array of URLs for a playlist. |
-| `style` | `ViewStyle` | Yes | Apply custom styling |
-| `autoplay` | `boolean` | No | Autoplay video when loaded |
-| `loop` | `boolean` | No | Should the video/playlist loop when finished. **Note:** Playlist advancement and looping are handled in the JavaScript layer via the `onPlaybackComplete` callback. The native player only loops single videos based on this prop. |
-| `onLoadStart` | `(event: { nativeEvent?: { index?: number } }) => void` | No | Callback when video begins loading. The `event.nativeEvent` may contain an `index` property on Android when playing a playlist. |
-| `onReadyToPlay` | `() => void` | No | Callback when video is ready to play |
-| `onError` | `(error: any) => void` | No | Callback when an error occurs |
-| `onPlaybackComplete` | `() => void` | No | Callback when video playback finishes. Use this callback to implement playlist advancement logic in your JavaScript code. |
-| `onProgress` | `(data: { currentTime: number; duration: number }) => void` | No | Callback for playback progress |
+<details>
+<summary><b>📸 Capture Video Frame</b></summary>
 
-## Events
+```tsx
+import React, { useState } from 'react';
+import { View, Button, Image } from 'react-native';
+import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
 
-Events can be listened to using `UnifiedPlayerEvents.addListener(eventType, listener)`. The available event types are defined in `UnifiedPlayerEventTypes`.
+export default function FrameCaptureExample() {
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const player = useVideoPlayer({ uri: 'https://example.com/video.mp4' });
 
-- `UnifiedPlayerEventTypes.READY` ('onReadyToPlay'): Fired when the player is ready to play.
-- `UnifiedPlayerEventTypes.ERROR` ('onError'): Fired when an error occurs.
-- `UnifiedPlayerEventTypes.PROGRESS` ('onProgress'): Fired during playback with current time and duration (`{ currentTime: number; duration: number }`).
-- `UnifiedPlayerEventTypes.COMPLETE` ('onPlaybackComplete'): Fired when video playback finishes.
-- `UnifiedPlayerEventTypes.STALLED` ('onPlaybackStalled'): Fired when playback stalls.
-- `UnifiedPlayerEventTypes.RESUMED` ('onPlaybackResumed'): Fired when playback resumes after stalling.
+  const captureFrame = async () => {
+    try {
+      const base64 = await player.captureFrame();
+      setThumbnail(`data:image/png;base64,${base64}`);
+    } catch (error) {
+      console.error('Capture failed:', error);
+    }
+  };
 
-## Methods
+  return (
+    <View style={{ flex: 1 }}>
+      <UnifiedPlayerView
+        player={player}
+        style={{ width: '100%', aspectRatio: 16 / 9 }}
+      />
 
-Control playback using the `UnifiedPlayer` object and the native tag of the `UnifiedPlayerView` instance (obtained via `ref.current.getNativeTag()`).
+      <Button title="Capture Frame" onPress={captureFrame} />
 
-- `UnifiedPlayer.play(viewTag: number)`: Starts video playback.
-- `UnifiedPlayer.pause(viewTag: number)`: Pauses video playback.
-- `UnifiedPlayer.seekTo(viewTag: number, time: number)`: Seeks to a specific time in seconds.
-- `UnifiedPlayer.getCurrentTime(viewTag: number): Promise<number>`: Gets the current playback time in seconds.
-- `UnifiedPlayer.getDuration(viewTag: number): Promise<number>`: Gets the duration of the video in seconds.
+      {thumbnail && (
+        <Image
+          source={{ uri: thumbnail }}
+          style={{ width: 200, height: 112, marginTop: 20 }}
+        />
+      )}
+    </View>
+  );
+}
+```
 
-## Development
+</details>
 
-### Prerequisites
+<details>
+<summary><b>🎚️ Playback Speed Control</b></summary>
 
-- Node.js >= 16
-- Yarn >= 1.22
-- React Native >= 0.79.0
-- iOS: Xcode >= 14.0
-- Android: Android Studio >= 2022.3
+```tsx
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
 
-### Setup
+const SPEEDS = [0.5, 1.0, 1.25, 1.5, 2.0];
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   yarn install
-   ```
-3. Build the project:
-   ```bash
-   yarn prepare
-   ```
+export default function SpeedControlExample() {
+  const [speed, setSpeed] = useState(1.0);
+  const player = useVideoPlayer({ uri: 'https://example.com/video.mp4' });
 
-### Running the Example App
+  const changeSpeed = (newSpeed: number) => {
+    player.rate = newSpeed;
+    setSpeed(newSpeed);
+  };
 
-1. Navigate to the example directory:
-   ```bash
-   cd example
-   ```
-2. Install dependencies:
-   ```bash
-   yarn install
-   ```
-3. Run the app:
-   ```bash
-   yarn ios  # for iOS
-   yarn android  # for Android
-   ```
+  return (
+    <View style={{ flex: 1 }}>
+      <UnifiedPlayerView
+        player={player}
+        style={{ width: '100%', aspectRatio: 16 / 9 }}
+      />
 
-## Publishing
+      <View style={styles.speedButtons}>
+        {SPEEDS.map((s) => (
+          <TouchableOpacity
+            key={s}
+            onPress={() => changeSpeed(s)}
+            style={[styles.speedBtn, speed === s && styles.activeSpeed]}
+          >
+            <Text>{s}x</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+```
 
-This package is automatically published to npm when changes are pushed to the `main` or `master` branch. See [PUBLISHING.md](.github/PUBLISHING.md) for setup instructions and details about npm's new authentication system (granular access tokens).
+</details>
 
-## Contributing
+<details>
+<summary><b>📝 Subtitles / Text Tracks</b></summary>
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+```tsx
+const player = useVideoPlayer({
+  uri: 'https://example.com/video.mp4',
+  externalSubtitles: [
+    {
+      label: 'English',
+      language: 'en',
+      uri: 'https://example.com/subs-en.vtt',
+      type: 'vtt',
+    },
+    {
+      label: 'Spanish',
+      language: 'es',
+      uri: 'https://example.com/subs-es.vtt',
+      type: 'vtt',
+    },
+  ],
+});
 
-## License
+// Get available tracks
+const tracks = player.getAvailableTextTracks();
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+// Select a track
+player.selectTextTrack(tracks[0]);
 
-## Author
+// Disable subtitles
+player.selectTextTrack(null);
+```
 
-Yaşar Özyurt ([@blueromans](https://github.com/blueromans))
+</details>
 
 ---
 
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
+## API Reference
+
+### `useVideoPlayer(source, setup?)`
+
+Creates a video player instance.
+
+```tsx
+const player = useVideoPlayer(
+  { uri: 'https://example.com/video.mp4' },
+  (player) => {
+    // Optional setup callback
+    player.loop = true;
+    player.volume = 0.8;
+  }
+);
+```
+
+#### Source Options
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `uri` | `string` | Video URL (required) |
+| `headers` | `Record<string, string>` | HTTP headers for the request |
+| `bufferConfig` | `BufferConfig` | Buffer configuration |
+| `externalSubtitles` | `ExternalSubtitle[]` | External subtitle tracks |
+
+---
+
+### `<UnifiedPlayerView />`
+
+Video player component.
+
+#### Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `player` | `VideoPlayer` | *required* | Player instance from `useVideoPlayer` |
+| `style` | `ViewStyle` | - | View styling |
+| `controls` | `boolean` | `false` | Show native controls |
+| `fullscreen` | `boolean` | `false` | Fullscreen mode |
+| `autoplay` | `boolean` | `true` | Auto-start playback |
+| `resizeMode` | `ResizeMode` | `'none'` | `'contain'` \| `'cover'` \| `'stretch'` \| `'none'` |
+| `pictureInPicture` | `boolean` | `false` | Enable PiP button |
+| `autoEnterPictureInPicture` | `boolean` | `false` | Auto-enter PiP on background |
+| `keepScreenAwake` | `boolean` | `true` | Prevent screen sleep |
+| `surfaceType` | `SurfaceType` | `'surface'` | Android: `'surface'` \| `'texture'` |
+
+#### Events
+
+| Event | Callback |
+|-------|----------|
+| `onFullscreenChange` | `(isFullscreen: boolean) => void` |
+| `onPictureInPictureChange` | `(isInPiP: boolean) => void` |
+| `willEnterFullscreen` | `() => void` |
+| `willExitFullscreen` | `() => void` |
+| `willEnterPictureInPicture` | `() => void` |
+| `willExitPictureInPicture` | `() => void` |
+
+---
+
+### VideoPlayer Instance
+
+#### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `currentTime` | `number` | Current position (seconds) |
+| `duration` | `number` | Total duration (seconds) |
+| `volume` | `number` | Volume (0.0 - 1.0) |
+| `muted` | `boolean` | Mute state |
+| `rate` | `number` | Playback speed (1.0 = normal) |
+| `loop` | `boolean` | Loop playback |
+| `isPlaying` | `boolean` | Playing state |
+| `status` | `VideoPlayerStatus` | `'idle'` \| `'loading'` \| `'readyToPlay'` \| `'error'` |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `play()` | `void` | Start playback |
+| `pause()` | `void` | Pause playback |
+| `seekTo(seconds)` | `void` | Seek to position |
+| `seekBy(seconds)` | `void` | Seek relative |
+| `captureFrame()` | `Promise<string>` | Capture frame as base64 PNG |
+| `getAvailableTextTracks()` | `TextTrack[]` | Get subtitle tracks |
+| `selectTextTrack(track)` | `void` | Select subtitle track |
+| `release()` | `void` | Release resources |
+
+#### Events
+
+Subscribe with `player.addEventListener(event, callback)`:
+
+| Event | Payload |
+|-------|---------|
+| `onLoad` | `{ currentTime, duration, width, height, orientation }` |
+| `onProgress` | `{ currentTime, duration, bufferDuration }` |
+| `onPlaybackStateChange` | `{ isPlaying, isBuffering }` |
+| `onStatusChange` | `VideoPlayerStatus` |
+| `onEnd` | - |
+| `onError` | `VideoRuntimeError` |
+| `onBuffer` | `boolean` |
+| `onSeek` | `number` |
+| `onPlaybackRateChange` | `number` |
+| `onVolumeChange` | `{ volume, muted }` |
+
+---
+
+## Requirements
+
+| Platform | Minimum Version |
+|----------|-----------------|
+| React Native | 0.76.0 |
+| iOS | 15.1 |
+| Android | SDK 24 (Android 7.0) |
+| Nitro Modules | 0.27.2 |
+
+---
+
+## Migration from v0.x
+
+Version 1.0.0 introduces a new architecture. Here's how to migrate:
+
+```diff
+- import { UnifiedPlayerView, UnifiedPlayer } from 'react-native-unified-player';
++ import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
+
+- const playerRef = useRef(null);
++ const player = useVideoPlayer({ uri: videoUrl });
+
+- <UnifiedPlayerView
+-   ref={playerRef}
+-   videoUrl={videoUrl}
+-   onReadyToPlay={() => console.log('Ready')}
+- />
++ <UnifiedPlayerView
++   player={player}
++   controls
++ />
+
+- UnifiedPlayer.play(playerRef.current.getNativeTag());
++ player.play();
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) before submitting a PR.
+
+## License
+
+MIT © [Yaşar Özyurt](https://github.com/blueromans)
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ using <a href="https://github.com/mrousavy/nitro">Nitro Modules</a></sub>
+</p>

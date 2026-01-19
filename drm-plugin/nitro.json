@@ -1,0 +1,17 @@
+{
+  "cxxNamespace": ["unifiedplayerdrm"],
+  "ios": {
+    "iosModuleName": "UnifiedPlayerDrm"
+  },
+  "android": {
+    "androidNamespace": ["unifiedplayerdrm"],
+    "androidCxxLibName": "UnifiedPlayerDrm"
+  },
+  "autolinking": {
+    "PluginManager": {
+      "swift": "PluginManager",
+      "kotlin": "PluginManager"
+    }
+  },
+  "ignorePaths": ["node_modules"]
+}
