@@ -1,0 +1,117 @@
+{
+  "name": "@react-native-unified-player/drm",
+  "version": "0.1.0",
+  "description": "DRM plugin for react-native-unified-player",
+  "main": "./lib/module/index.js",
+  "types": "./lib/typescript/src/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.tsx",
+      "types": "./lib/typescript/src/index.d.ts",
+      "default": "./lib/module/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "cpp",
+    "nitrogen",
+    "nitro.json",
+    "*.podspec",
+    "react-native.config.js",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "test": "jest",
+    "typecheck": "tsc",
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
+    "prepare": "bob build",
+    "specs": "nitrogen"
+  },
+  "keywords": [
+    "react-native",
+    "react-native-unified-player",
+    "drm",
+    "ios",
+    "android"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blueromans/react-native-unified-player.git"
+  },
+  "author": "Yasar Ozyurt <blueromans@hotmail.com> (https://github.com/blueromans)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/blueromans/react-native-unified-player/issues"
+  },
+  "homepage": "https://github.com/blueromans/react-native-unified-player#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "devDependencies": {
+    "@react-native/babel-preset": "0.79.2",
+    "@types/react": "^18.3.0",
+    "del-cli": "^5.1.0",
+    "eslint": "^8.51.0",
+    "eslint-config-prettier": "9.0.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "nitrogen": "^0.31.0",
+    "prettier": "^3.0.3",
+    "react": "18.3.1",
+    "react-native": "^0.77.0",
+    "react-native-builder-bob": "^0.40.13",
+    "react-native-nitro-modules": "^0.31.0",
+    "typescript": "^5.8.3",
+    "react-native-unified-player": "*"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-unified-player": ">=0.7.0",
+    "react-native-nitro-modules": ">=0.27.2"
+  },
+  "jest": {
+    "preset": "react-native",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/example/node_modules",
+      "<rootDir>/lib/"
+    ]
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "create-react-native-library": {
+    "languages": "kotlin-swift",
+    "type": "nitro-module",
+    "version": "0.52.0"
+  }
+}

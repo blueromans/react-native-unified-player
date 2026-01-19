@@ -1,0 +1,29 @@
+{
+  "android": {
+    "androidCxxLibName": "UnifiedPlayer",
+    "androidNamespace": [
+      "unifiedplayer"
+    ]
+  },
+  "cxxNamespace": [
+    "unifiedplayer"
+  ],
+  "ios": {
+    "iosModuleName": "UnifiedPlayer"
+  },
+  "ignorePaths": ["drm-plugin", "node_modules"],
+  "autolinking": {
+    "VideoPlayerFactory": {
+      "swift": "HybridVideoPlayerFactory",
+      "kotlin": "HybridVideoPlayerFactory"
+    },
+    "VideoPlayerSourceFactory": {
+      "swift": "HybridVideoPlayerSourceFactory",
+      "kotlin": "HybridVideoPlayerSourceFactory"
+    },
+    "VideoViewViewManagerFactory": {
+      "swift": "HybridVideoViewViewManagerFactory",
+      "kotlin": "HybridVideoViewViewManagerFactory"
+    }
+  }
+}
