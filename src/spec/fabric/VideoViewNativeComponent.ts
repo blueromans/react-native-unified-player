@@ -1,20 +1,15 @@
-import type { ViewProps } from 'react-native';
-import type {
-  DirectEventHandler,
-  Int32,
-} from 'react-native/Libraries/Types/CodegenTypes';
-import codegenNativeComponent from 'react-native/Libraries/Utilities/codegenNativeComponent';
+import { requireNativeComponent, type ViewProps } from 'react-native';
+import type { HostComponent } from 'react-native';
 
 type OnNitroIdChangeEvent = Readonly<{
-  nitroId: Int32;
+  nitroId: number;
 }>;
 
 export interface ViewViewNativeProps extends ViewProps {
-  nitroId: Int32;
-  onNitroIdChange?: DirectEventHandler<OnNitroIdChangeEvent>;
+  nitroId: number;
+  onNitroIdChange?: (event: { nativeEvent: OnNitroIdChangeEvent }) => void;
 }
 
-export default codegenNativeComponent<ViewViewNativeProps>('RNCVideoView', {
-  interfaceOnly: true,
-  paperComponentName: 'RNCVideoView',
-});
+export default requireNativeComponent<ViewViewNativeProps>(
+  'RNCVideoView'
+) as HostComponent<ViewViewNativeProps>;
