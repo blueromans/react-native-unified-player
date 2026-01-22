@@ -14,4 +14,7 @@ export interface ViewViewNativeProps extends ViewProps {
   onNitroIdChange?: DirectEventHandler<OnNitroIdChangeEvent>;
 }
 
-export default codegenNativeComponent<ViewViewNativeProps>('RNCVideoView');
+export default codegenNativeComponent<ViewViewNativeProps>('RNCVideoView', {
+  interfaceOnly: true,
+  paperComponentName: 'RNCVideoView',
+});
