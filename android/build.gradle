@@ -244,6 +244,6 @@ if (isNewArchitectureEnabled()) {
   react {
     jsRootDir = file("../src/spec/fabric")
     libraryName = "RNCVideoView"
-    codegenJavaPackageName = "com.unifiedplayer"
+    codegenJavaPackageName = "com.facebook.react.viewmanagers"
   }
 }

@@ -7,22 +7,30 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { UnifiedPlayerView, useVideoPlayer } from 'react-native-unified-player';
 
 const singleVideoUrl =
   'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4';
+
+const PLAYBACK_SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 function App(): React.JSX.Element {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekValue, setSeekValue] = useState(0);
 
   const player = useVideoPlayer({ uri: singleVideoUrl }, (p) => {
     p.loop = true;
     p.addEventListener('onProgress', (progress) => {
-      setCurrentTime(progress.currentTime);
-      setDuration(progress.duration);
+      if (!isSeeking) {
+        setCurrentTime(progress.currentTime);
+        setDuration(progress.duration);
+      }
     });
     p.addEventListener('onPlaybackStateChange', (state) => {
       setIsPlaying(state.isPlaying);
@@ -57,6 +65,31 @@ function App(): React.JSX.Element {
     setIsFullscreen((prev) => !prev);
   }, []);
 
+  const handleSliderValueChange = useCallback((value: number) => {
+    setSeekValue(value);
+  }, []);
+
+  const handleSliderSlidingStart = useCallback(() => {
+    setIsSeeking(true);
+  }, []);
+
+  const handleSliderSlidingComplete = useCallback(
+    (value: number) => {
+      player.seekTo(value);
+      setCurrentTime(value);
+      setIsSeeking(false);
+    },
+    [player]
+  );
+
+  const handleSpeedChange = useCallback(
+    (speed: number) => {
+      player.rate = speed;
+      setPlaybackSpeed(speed);
+    },
+    [player]
+  );
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -80,9 +113,24 @@ function App(): React.JSX.Element {
         </View>
 
         <View style={styles.progressContainer}>
-          <Text style={styles.progressText}>
-            {formatTime(currentTime)} / {formatTime(duration)}
-          </Text>
+          <View style={styles.sliderContainer}>
+            <Text style={styles.timeText}>
+              {formatTime(isSeeking ? seekValue : currentTime)}
+            </Text>
+            <Slider
+              style={styles.slider}
+              minimumValue={0}
+              maximumValue={duration > 0 ? duration : 1}
+              value={isSeeking ? seekValue : currentTime}
+              onValueChange={handleSliderValueChange}
+              onSlidingStart={handleSliderSlidingStart}
+              onSlidingComplete={handleSliderSlidingComplete}
+              minimumTrackTintColor="#007AFF"
+              maximumTrackTintColor="#CCCCCC"
+              thumbTintColor="#007AFF"
+            />
+            <Text style={styles.timeText}>{formatTime(duration)}</Text>
+          </View>
         </View>
 
         <View style={styles.controls}>
@@ -110,6 +158,31 @@ function App(): React.JSX.Element {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.speedContainer}>
+          <Text style={styles.speedLabel}>Playback Speed:</Text>
+          <View style={styles.speedButtonsRow}>
+            {PLAYBACK_SPEEDS.map((speed) => (
+              <TouchableOpacity
+                key={speed}
+                style={[
+                  styles.speedButton,
+                  playbackSpeed === speed && styles.speedButtonActive,
+                ]}
+                onPress={() => handleSpeedChange(speed)}
+              >
+                <Text
+                  style={[
+                    styles.speedButtonText,
+                    playbackSpeed === speed && styles.speedButtonTextActive,
+                  ]}
+                >
+                  {speed}x
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={styles.actionButton}
@@ -125,6 +198,7 @@ function App(): React.JSX.Element {
           <Text style={styles.statusText}>
             Status: {isPlaying ? 'Playing' : 'Paused'}
           </Text>
+          <Text style={styles.statusText}>Speed: {playbackSpeed}x</Text>
           <Text style={styles.statusText}>
             Loop: {player.loop ? 'On' : 'Off'}
           </Text>
@@ -164,8 +238,23 @@ const styles = StyleSheet.create({
   },
   progressContainer: {
     width: '90%',
-    alignItems: 'center',
     marginBottom: 20,
+  },
+  sliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  slider: {
+    flex: 1,
+    height: 40,
+    marginHorizontal: 8,
+  },
+  timeText: {
+    fontSize: 12,
+    color: '#666',
+    minWidth: 45,
+    textAlign: 'center',
   },
   progressText: {
     fontSize: 16,
@@ -208,6 +297,42 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  speedContainer: {
+    width: '90%',
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  speedLabel: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  speedButtonsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  speedButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#E5E5E5',
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  speedButtonActive: {
+    backgroundColor: '#007AFF',
+  },
+  speedButtonText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  speedButtonTextActive: {
+    color: 'white',
   },
   statusContainer: {
     width: '90%',

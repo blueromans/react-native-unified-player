@@ -531,6 +531,7 @@ class HybridVideoPlayer() : HybridVideoPlayerSpec(), AutoCloseable {
     }
 
     override fun onPlayerError(error: PlaybackException) {
+      Log.e(TAG, "Player error: ${error.errorCodeName} - ${error.message}", error)
       status = VideoPlayerStatus.ERROR
       stopProgressUpdates()
     }

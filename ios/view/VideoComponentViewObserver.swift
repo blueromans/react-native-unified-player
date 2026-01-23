@@ -123,19 +123,23 @@ class VideoComponentViewObserver: NSObject, AVPlayerViewControllerDelegate {
     willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
   ) {
     delegate?.willExitFullscreen()
-    
+
     coordinator.animate(alongsideTransition: nil) { [weak self] _ in
       guard let self = self else { return }
+      // Restore user's controls setting when exiting fullscreen
+      self.view?.onExitFullscreen()
       self.delegate?.onFullscreenChange(false)
     }
   }
-  
+
   func playerViewController(
     _: AVPlayerViewController,
     willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
   ) {
     delegate?.willEnterFullscreen()
-    
+    // Enable controls overlay when entering fullscreen
+    view?.onEnterFullscreen()
+
     coordinator.animate(alongsideTransition: nil) { [weak self] _ in
       guard let self = self else { return }
       self.delegate?.onFullscreenChange(true)

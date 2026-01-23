@@ -49,12 +49,38 @@ import UIKit
     }
   }
 
+  /// User's controls setting (preserved for when exiting fullscreen)
+  private var _userControls: Bool = false
+
+  /// Whether currently in fullscreen mode
+  private var _isFullscreen: Bool = false
+
   public var controls: Bool = false {
     didSet {
+      _userControls = controls
       DispatchQueue.main.async { [weak self] in
         guard let self = self, let playerViewController = self.playerViewController else { return }
-        playerViewController.showsPlaybackControls = self.controls
+        // In fullscreen, always show controls; otherwise respect user setting
+        playerViewController.showsPlaybackControls = self._isFullscreen ? true : self.controls
       }
+    }
+  }
+
+  /// Called when entering fullscreen to enable controls overlay
+  func onEnterFullscreen() {
+    _isFullscreen = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self, let playerViewController = self.playerViewController else { return }
+      playerViewController.showsPlaybackControls = true
+    }
+  }
+
+  /// Called when exiting fullscreen to restore user's controls setting
+  func onExitFullscreen() {
+    _isFullscreen = false
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self, let playerViewController = self.playerViewController else { return }
+      playerViewController.showsPlaybackControls = self._userControls
     }
   }
 

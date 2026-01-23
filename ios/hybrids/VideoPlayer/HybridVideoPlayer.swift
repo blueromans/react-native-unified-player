@@ -52,7 +52,11 @@ class HybridVideoPlayer: HybridVideoPlayerSpec, NativeVideoPlayerSpec {
           }
           self.player.replaceCurrentItem(with: self.playerItem)
         } catch {
-          // Ignore cancellation errors during initialization
+          // Only ignore cancellation errors, report others via status change
+          if !(error is CancellationError) {
+            print("[UnifiedPlayer] Initialization failed: \(error.localizedDescription)")
+            self.status = .error
+          }
         }
       }
     }
