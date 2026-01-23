@@ -16,6 +16,11 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/blueromans/react-native-unified-player.git", :tag => "#{s.version}" }
 
+  # Always depend on React core headers so the bridging header can import React
+  s.dependency "React-Core"
+  # Ensure jsinspector vendored framework is present (required when use_frameworks is enabled)
+  s.dependency "React-jsinspector"
+
   s.source_files = [
     "ios/*.{h,m,mm,swift}",
     "ios/core/**/*.{h,m,mm,swift}",
