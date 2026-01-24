@@ -1,6 +1,6 @@
 {
   "name": "react-native-unified-player",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Unified Player",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
