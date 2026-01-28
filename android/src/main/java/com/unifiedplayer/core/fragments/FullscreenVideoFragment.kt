@@ -2,9 +2,11 @@ package com.unifiedplayer.core.fragments
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -31,6 +33,7 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
   private var originalPlayerParent: ViewGroup? = null
   private var originalPlayerLayoutParams: ViewGroup.LayoutParams? = null
   private var rootContentViews: List<View> = listOf()
+  private var originalOrientation: Int? = null
 
   // Back press callback to handle back navigation
   private val backPressCallback = object : OnBackPressedCallback(true) {
@@ -54,6 +57,11 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
       keepScreenOn = true
     }
     return this.container
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    super.onSaveInstanceState(outState)
+    originalOrientation?.let { outState.putInt("originalOrientation", it) }
   }
 
   override fun onResume() {
@@ -81,6 +89,16 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
         requireActivity().setPictureInPictureParams(params)
       } catch (_: Exception) {}
     }
+
+
+
+    // Creating a fullscreen fragment usually means we want to be in landscape
+    if (savedInstanceState != null && savedInstanceState.containsKey("originalOrientation")) {
+      originalOrientation = savedInstanceState.getInt("originalOrientation")
+    } else {
+      originalOrientation = requireActivity().requestedOrientation
+    }
+    requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
   }
 
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
@@ -157,6 +175,34 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
     
     // Apply optimizations based on video player size in fullscreen mode
     SmallVideoPlayerOptimizer.applyOptimizations(videoView.playerView, requireContext(), isFullscreen = true)
+
+    // Add close button after player view so it's on top
+    setupCloseButton()
+  }
+
+  private fun setupCloseButton() {
+    val context = requireContext()
+    val closeButton = ImageButton(context).apply {
+      setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+      setBackgroundColor(android.graphics.Color.TRANSPARENT)
+      setColorFilter(android.graphics.Color.WHITE)
+      setPadding(16, 16, 16, 16)
+      
+      layoutParams = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT
+      ).apply {
+        gravity = Gravity.TOP or Gravity.START
+        topMargin = 64
+        leftMargin = 64
+      }
+      
+      setOnClickListener {
+        exitFullscreen()
+      }
+    }
+    
+    container?.addView(closeButton)
   }
 
   @SuppressLint("PrivateResource")
@@ -208,6 +254,12 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
     backPressCallback.remove()
 
     restoreSystemUI()
+
+    // Restore original orientation
+    originalOrientation?.let { orientation ->
+      requireActivity().requestedOrientation = orientation
+    }
+    originalOrientation = null
 
     // Keep controls disabled if in PiP mode - media session creates its own controls for PiP
     val isInPictureInPictureMode = requireActivity().isInPictureInPictureMode
