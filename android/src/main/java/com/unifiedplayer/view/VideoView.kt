@@ -560,6 +560,6 @@ class VideoView @JvmOverloads constructor(
   }
 
   private fun applySmallPlayerLayoutFixes() {
-    SmallVideoPlayerOptimizer.applyOptimizations(playerView, context, isFullscreen = false)
+    SmallVideoPlayerOptimizer.applyOptimizations(playerView, context, isFullscreen = isInFullscreen)
   }
 }

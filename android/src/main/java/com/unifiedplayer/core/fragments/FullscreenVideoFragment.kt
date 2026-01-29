@@ -108,7 +108,8 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
       videoView.playerView.useController = false
       videoView.playerView.controllerAutoShow = false
     } else {
-      videoView.playerView.useController = videoView.useController
+      // In fullscreen, we always want controls enabled
+      videoView.playerView.useController = true
       videoView.playerView.controllerAutoShow = true
     }
   }
@@ -122,7 +123,8 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
       videoView.playerView.useController = false
       videoView.playerView.controllerAutoShow = false
     } else {
-      videoView.playerView.useController = videoView.useController
+      // In fullscreen, we always want controls enabled
+      videoView.playerView.useController = true
       videoView.playerView.controllerAutoShow = true
     }
   }
