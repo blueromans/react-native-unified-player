@@ -57,6 +57,18 @@
                 android:paddingLeft="4dp"
                 android:paddingRight="4dp"
                 android:includeFontPadding="false"
+
+                android:textColor="#FFBEBEBE"/>
+
+            <TextView android:id="@+id/exo_playback_speed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:includeFontPadding="false"
+                android:text="1.0x"
                 android:textColor="#FFBEBEBE"/>
                 
              <ImageButton android:id="@id/exo_fullscreen"
