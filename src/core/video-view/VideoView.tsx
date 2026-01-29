@@ -71,6 +71,16 @@ export interface VideoViewProps extends Partial<VideoViewEvents>, ViewProps {
    * Set to true to enter fullscreen, false to exit fullscreen.
    */
   fullscreen?: boolean;
+  /**
+   * Whether the video acts as paused.
+   * - true: Pause the video
+   * - false: Play the video
+   */
+  paused?: boolean;
+  /**
+   * The playback speed of the video. Defaults to 1.0.
+   */
+  speed?: number;
 }
 
 export interface VideoViewRef {
@@ -161,6 +171,8 @@ const VideoView = React.forwardRef<VideoViewRef, VideoViewProps>(
       resizeMode = 'none',
       autoplay = true,
       fullscreen = false,
+      paused,
+      speed,
       onPictureInPictureChange,
       onFullscreenChange,
       willEnterFullscreen,
@@ -393,7 +405,7 @@ const VideoView = React.forwardRef<VideoViewRef, VideoViewProps>(
         return;
       }
 
-      // Updates props to native view
+      // Update props to native view
       updateProps(nitroViewManager.current, {
         ...props,
         player: player,
@@ -412,14 +424,35 @@ const VideoView = React.forwardRef<VideoViewRef, VideoViewProps>(
       isManagerReady,
     ]);
 
+    // Handle paused prop changes
+    React.useEffect(() => {
+      if (paused === undefined) return;
+
+      if (paused) {
+        player.pause();
+      } else {
+        player.play();
+      }
+    }, [paused, player]);
+
+    // Handle speed prop changes
+    React.useEffect(() => {
+      if (speed === undefined) return;
+
+      player.rate = speed;
+    }, [speed, player]);
+
     // Handle autoplay when the view manager is ready
     const hasAutoplayedRef = React.useRef(false);
     React.useEffect(() => {
+      // If paused is explicitly set to true, we shouldn't autoplay
+      if (paused) return;
+
       if (isManagerReady && autoplay && !hasAutoplayedRef.current) {
         hasAutoplayedRef.current = true;
         player.play();
       }
-    }, [isManagerReady, autoplay, player]);
+    }, [isManagerReady, autoplay, player, paused]);
 
     // Handle fullscreen prop changes
     React.useEffect(() => {
