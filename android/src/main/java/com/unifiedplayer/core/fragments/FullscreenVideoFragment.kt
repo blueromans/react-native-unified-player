@@ -289,12 +289,13 @@ class FullscreenVideoFragment(private val videoView: VideoView) : Fragment() {
     }
     originalOrientation = null
 
-    // Keep controls disabled if in PiP mode - media session creates its own controls for PiP
-    val isInPictureInPictureMode = requireActivity().isInPictureInPictureMode
-    if (isInPictureInPictureMode) {
-      videoView.playerView.useController = false
-    } else if (videoView.useController == false) {
-      videoView.playerView.useController = false
+    // Restore controller state from VideoView settings
+    videoView.playerView.useController = videoView.useController
+    if (videoView.useController) {
+      videoView.playerView.controllerAutoShow = true
+    } else {
+      videoView.playerView.hideController()
+      videoView.playerView.controllerAutoShow = false
     }
 
     // Ensure PlayerView keeps black background when returning to normal mode
